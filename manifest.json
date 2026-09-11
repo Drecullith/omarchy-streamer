@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.drecullith.streamer",
+  "name": "Omarchy Streamer",
+  "version": "0.1.0",
+  "author": "Drecullith",
+  "description": "Streamer mode for Omarchy: OBS orchestration, privacy controls, health status, and creator workflows",
+  "homepage": "https://github.com/Drecullith/omarchy-streamer",
+  "license": "MIT",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Streamer",
+    "description": "Streamer mode, OBS and privacy status",
+    "category": "Media",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
