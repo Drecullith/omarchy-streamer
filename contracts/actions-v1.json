@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "namespace": "io.github.drecullith.streamer",
+  "description": "Stable action contract for UI, automation and future Lychnos control",
+  "actions": [
+    {"id":"mode.enable","implemented":true,"agentConfirmation":"session","description":"Enable streamer mode and its privacy protections"},
+    {"id":"mode.disable","implemented":true,"agentConfirmation":"session","description":"Disable streamer mode and restore captured user state"},
+    {"id":"mode.toggle","implemented":true,"agentConfirmation":"session","description":"Toggle streamer mode"},
+    {"id":"privacy.enable","implemented":true,"agentConfirmation":"session","description":"Enable streamer privacy protections"},
+    {"id":"privacy.disable","implemented":true,"agentConfirmation":"session","description":"Disable streamer privacy protections and restore notification state"},
+    {"id":"obs.launch","implemented":true,"agentConfirmation":"required","description":"Launch OBS Studio if installed"},
+    {"id":"stream.start","implemented":false,"agentConfirmation":"required","description":"Start the configured live stream"},
+    {"id":"stream.stop","implemented":false,"agentConfirmation":"required","description":"Stop the current live stream"},
+    {"id":"record.start","implemented":false,"agentConfirmation":"required","description":"Start local recording"},
+    {"id":"record.stop","implemented":false,"agentConfirmation":"required","description":"Stop local recording"},
+    {"id":"clip.save","implemented":false,"agentConfirmation":"session","description":"Save the configured replay-buffer clip"},
+    {"id":"scene.set","implemented":false,"agentConfirmation":"required","argument":"sceneName","description":"Switch to a named OBS scene"},
+    {"id":"mic.mute","implemented":false,"agentConfirmation":"session","description":"Mute the configured microphone"},
+    {"id":"mic.unmute","implemented":false,"agentConfirmation":"session","description":"Unmute the configured microphone"},
+    {"id":"health.refresh","implemented":true,"agentConfirmation":"none","description":"Refresh streamer health and dependency state"}
+  ]
+}
