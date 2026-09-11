@@ -49,7 +49,7 @@ def obs_config_path() -> Path:
     return xdg / "obs-studio" / "plugin_config" / "obs-websocket" / "config.json"
 
 
-def load_connection() -> tuple[str, int, str, bool]:
+def load_connection() -> tuple[str, int, str]:
     host = os.environ.get("OMARCHY_STREAMER_OBS_HOST", DEFAULT_HOST)
     allow_remote = os.environ.get("OMARCHY_STREAMER_OBS_ALLOW_REMOTE", "0") == "1"
     if host not in {"127.0.0.1", "localhost", "::1"} and not allow_remote:
@@ -71,8 +71,7 @@ def load_connection() -> tuple[str, int, str, bool]:
         raise ObsError("invalid OBS WebSocket port")
 
     password = os.environ.get("OMARCHY_STREAMER_OBS_PASSWORD", str(cfg.get("server_password", "")))
-    auth_enabled = bool(cfg.get("auth_required", bool(password)))
-    return host, port, password, auth_enabled
+    return host, port, password
 
 
 class WebSocket:
@@ -81,6 +80,7 @@ class WebSocket:
         self.port = port
         self.timeout = timeout
         self.sock: socket.socket | None = None
+        self.buffer = bytearray()
 
     def connect(self) -> None:
         sock = socket.create_connection((self.host, self.port), timeout=self.timeout)
@@ -97,7 +97,8 @@ class WebSocket:
         sock.sendall(request)
 
         raw = bytearray()
-        while b"\r\n\r\n" not in raw:
+        marker = b"\r\n\r\n"
+        while marker not in raw:
             chunk = sock.recv(4096)
             if not chunk:
                 raise ObsError("OBS closed the WebSocket handshake")
@@ -105,7 +106,8 @@ class WebSocket:
             if len(raw) > 65536:
                 raise ObsError("oversized WebSocket handshake")
 
-        headers = bytes(raw).split(b"\r\n\r\n", 1)[0].decode("latin1")
+        header_bytes, remainder = bytes(raw).split(marker, 1)
+        headers = header_bytes.decode("latin1")
         lines = headers.split("\r\n")
         if not lines or " 101 " not in f" {lines[0]} ":
             raise ObsError(f"OBS WebSocket handshake failed: {lines[0] if lines else 'no response'}")
@@ -121,23 +123,29 @@ class WebSocket:
             raise ObsError("invalid WebSocket handshake response")
 
         self.sock = sock
+        self.buffer = bytearray(remainder)
 
     def close(self) -> None:
         if self.sock is None:
             return
         try:
             self._send_frame(b"", opcode=0x8)
-        except OSError:
+        except (OSError, ObsError):
             pass
         try:
             self.sock.close()
         finally:
             self.sock = None
+            self.buffer.clear()
 
     def _read_exact(self, count: int) -> bytes:
         if self.sock is None:
             raise ObsError("WebSocket is not connected")
         out = bytearray()
+        if self.buffer:
+            take = min(count, len(self.buffer))
+            out.extend(self.buffer[:take])
+            del self.buffer[:take]
         while len(out) < count:
             chunk = self.sock.recv(count - len(out))
             if not chunk:
@@ -209,7 +217,7 @@ class WebSocket:
 
 class ObsClient:
     def __init__(self, timeout: float = DEFAULT_TIMEOUT) -> None:
-        host, port, password, _ = load_connection()
+        host, port, password = load_connection()
         self.password = password
         self.ws = WebSocket(host, port, timeout)
 
