@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "namespace": "io.github.drecullith.streamer",
-  "description": "Stable action contract for UI, automation and future Lychnos control",
+  "description": "Stable action contract for UI, automation and external integrations",
   "actions": [
     {"id":"mode.enable","implemented":true,"agentConfirmation":"session","description":"Enable streamer mode and its privacy protections"},
     {"id":"mode.disable","implemented":true,"agentConfirmation":"session","description":"Disable streamer mode and restore captured user state"},
