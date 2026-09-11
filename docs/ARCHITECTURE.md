@@ -4,11 +4,12 @@
 
 Omarchy Streamer is a third-party Omarchy Quattro plugin that turns a normal desktop session into a deliberate streaming/recording workspace without hiding privileged actions or taking permanent ownership of user settings.
 
-The initial architecture has three layers:
+The v0.2 architecture has four layers:
 
 1. `BarWidget.qml` — user-facing status and fast controls.
 2. `Service.qml` — long-lived Quickshell service and IPC boundary.
-3. `bin/streamerctl` — small user-level controller for OS/process state and reversible privacy changes.
+3. `bin/streamerctl` — user-level controller for mode state, health and reversible privacy changes.
+4. `bin/obsws.py` — localhost OBS WebSocket v5 adapter implemented with the Python standard library.
 
 ## Core invariants
 
@@ -18,8 +19,9 @@ The initial architecture has three layers:
 - Missing dependencies are reported, not silently installed.
 - State changed by Streamer Mode must be restorable when the mode is disabled.
 - Broadcast-affecting actions have stable names and are exposed through one action contract.
-- Future automation or external control must call the same explicit actions as the UI; integrations do not get a hidden privileged path.
-- Starting/stopping a stream, recording, changing a live scene, launching OBS, or unmuting a microphone must remain permission-aware for external automation.
+- External automation must call the same explicit actions as the UI; it receives no hidden privileged path.
+- High-impact actions remain identifiable in the contract so callers can require confirmation before invoking them.
+- Stream keys and streaming-service credentials are not stored by Omarchy Streamer.
 
 ## State
 
@@ -31,9 +33,11 @@ or, when `XDG_STATE_HOME` is unset:
 
 `~/.local/state/omarchy-streamer/`
 
-v0.1 uses marker files for active mode and privacy state, plus a snapshot of the notification DND state that existed before Streamer Privacy was enabled.
+Marker files record active mode/privacy state plus a snapshot of the notification DND state that existed before Streamer Privacy was enabled.
 
 This makes notification suppression reversible. If DND was already on before Streamer Mode, disabling Streamer Mode leaves it on.
+
+OBS state is **not** persisted as authoritative state. Stream/record/replay/scene state is queried from OBS itself.
 
 ## IPC
 
@@ -55,44 +59,129 @@ toggle
 
 The stable action vocabulary is documented in `contracts/actions-v1.json`.
 
-External integrations should use this same IPC boundary rather than separate command paths. Broadcast-affecting actions remain explicit, observable, and permission-aware.
+The UI and external integrations share this same boundary. There is no separate unrestricted automation route.
 
-## OBS integration roadmap
+## OBS integration
 
-v0.1 deliberately limits OBS automation to detection and launch. It does not guess at third-party command-line syntax.
+OBS Studio 28+ includes obs-websocket. v0.2 speaks its v5 JSON protocol directly.
 
-The next adapter should speak to OBS WebSocket directly or through a small audited local client and implement:
+Control flow:
 
-- stream start/stop
-- recording start/stop
-- replay-buffer save
-- scene switching
-- encoder/bitrate/connection health
+```text
+UI / IPC action
+      │
+      ▼
+Service.qml / streamerctl
+      │
+      ▼
+obsws.py
+      │
+      ▼
+127.0.0.1:4455 (default)
+      │
+      ▼
+OBS Studio
+```
 
-The OBS adapter should remain replaceable and must never contain stream keys or service credentials in repository files.
+Implemented requests include:
+
+- `GetStreamStatus`, `StartStream`, `StopStream`
+- `GetRecordStatus`, `StartRecord`, `StopRecord`
+- `GetReplayBufferStatus`, `StartReplayBuffer`, `StopReplayBuffer`, `SaveReplayBuffer`
+- `GetSceneList`, `SetCurrentProgramScene`
+
+`GetSceneList` is used for current-scene status rather than depending on a separate current-program-scene query.
+
+### OBS authentication and connection rules
+
+The adapter:
+
+- reads OBS's local `plugin_config/obs-websocket/config.json` by default,
+- uses OBS's configured WebSocket password for the v5 challenge/response handshake,
+- never writes that password into Streamer state,
+- defaults to localhost,
+- rejects a non-loopback host unless `OMARCHY_STREAMER_OBS_ALLOW_REMOTE=1` is explicitly set,
+- verifies the RFC 6455 WebSocket upgrade response,
+- masks client frames as required by the WebSocket protocol.
+
+Environment overrides exist for advanced/testing use:
+
+```text
+OMARCHY_STREAMER_OBS_CONFIG
+OMARCHY_STREAMER_OBS_HOST
+OMARCHY_STREAMER_OBS_PORT
+OMARCHY_STREAMER_OBS_PASSWORD
+OMARCHY_STREAMER_OBS_TIMEOUT
+OMARCHY_STREAMER_OBS_ALLOW_REMOTE
+```
+
+## Health model
+
+`streamerctl status` combines local mode/dependency state with live OBS state.
+
+Important fields include:
+
+```text
+active
+privacy
+obsInstalled
+obsRunning
+pipewireReady
+wpctlInstalled
+pythonReady
+dndState
+dndManaged
+obsWebSocket.connected
+obsWebSocket.streaming
+obsWebSocket.recording
+obsWebSocket.replayBuffer
+obsWebSocket.currentScene
+obsWebSocket.error
+```
+
+Unknown OBS output states are represented as `null`, not `false`, when the WebSocket cannot be queried. This avoids presenting an unreachable OBS instance as definitely idle.
 
 ## Audio roadmap
 
-PipeWire is treated as the native audio layer. Future audio controls will use explicit device/node identities and should support:
+PipeWire is the native audio layer. v0.3 will add explicit device/node identities and should support:
 
 - microphone mute/unmute
 - microphone selection
 - per-source monitoring
 - collaborator/game/browser routing
-- health warnings when the configured source disappears
+- health warnings when a configured source disappears
 
 ## Privacy roadmap
 
-v0.1 integrates with Omarchy notification DND and restores the user's prior DND state. Later protections may include:
+v0.2 integrates with Omarchy notification DND and restores the user's prior DND state. The bar also raises a visible warning if OBS reports streaming/recording while Streamer Privacy is off.
 
-- notification history suppression during capture
+Later protections may include:
+
+- notification-history suppression during capture
 - stream-safe workspaces
 - sensitive-window warnings
 - clipboard-popup suppression
 - optional screen-share allowlists
+- emergency stop/mute controls
 
 Privacy protections should fail safe and visibly report when a requested protection could not be applied.
 
-## Mode700 and collaboration
+## Collaboration
 
-Mode700 is a later communication integration, not a hard dependency. Omarchy Streamer should expose collaborator presence and room controls through adapters so Mode700, browser-based guests, or other collaboration tools can be swapped without changing the core mode lifecycle.
+Collaboration is adapter-based rather than a hard dependency on one communications product. The core should expose collaborator presence and room controls in a way that browser guests, Mode700, or other collaboration tools can use without changing Streamer Mode's lifecycle.
+
+## Tests
+
+CI currently validates:
+
+- manifest and action-contract JSON,
+- controller shell syntax,
+- Python adapter syntax,
+- safe status behavior when OBS/Omarchy services are absent,
+- a fake local OBS WebSocket server exercising handshake + RPC,
+- coalesced HTTP-upgrade and first WebSocket-frame handling,
+- stream/record/replay/clip/scene actions,
+- default rejection of unintended remote OBS hosts,
+- public documentation remaining integration-neutral.
+
+The final missing class of validation is a real Omarchy Quattro + OBS + PipeWire machine test.
