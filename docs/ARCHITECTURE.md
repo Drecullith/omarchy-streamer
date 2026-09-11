@@ -18,8 +18,8 @@ The initial architecture has three layers:
 - Missing dependencies are reported, not silently installed.
 - State changed by Streamer Mode must be restorable when the mode is disabled.
 - Broadcast-affecting actions have stable names and are exposed through one action contract.
-- Future AI/agent control must call the same explicit actions as the UI; agents do not get a hidden privileged path.
-- Starting/stopping a stream, recording, changing a live scene, launching OBS, or unmuting a microphone must remain permission-aware when Lychnos integration is added.
+- Future automation or external control must call the same explicit actions as the UI; integrations do not get a hidden privileged path.
+- Starting/stopping a stream, recording, changing a live scene, launching OBS, or unmuting a microphone must remain permission-aware for external automation.
 
 ## State
 
@@ -55,14 +55,7 @@ toggle
 
 The stable action vocabulary is documented in `contracts/actions-v1.json`.
 
-Example future Lychnos flow:
-
-1. Lychnos requests `stream.start`.
-2. Lychnos checks the contract and sees that confirmation is required.
-3. The user approves.
-4. Lychnos invokes the same IPC action the UI would use.
-5. Omarchy Streamer validates prerequisites and delegates to the OBS adapter.
-6. Updated state is visible to both the bar widget and Lychnos.
+External integrations should use this same IPC boundary rather than separate command paths. Broadcast-affecting actions remain explicit, observable, and permission-aware.
 
 ## OBS integration roadmap
 
