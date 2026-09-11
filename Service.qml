@@ -63,7 +63,7 @@ Item {
     var actionName = String(name || "")
     if (actionName === "") return "invalid-action"
 
-    var argv = [root.helperPath, "action", actionName]
+    var argv = ["bash", root.helperPath, "action", actionName]
     if (arg !== undefined && arg !== null && String(arg) !== "") argv.push(String(arg))
 
     root.lastAction = actionName
@@ -98,7 +98,7 @@ Item {
 
   Process {
     id: statusProc
-    command: [root.helperPath, "status"]
+    command: ["bash", root.helperPath, "status"]
     running: false
     stdout: StdioCollector {
       waitForEnd: true
