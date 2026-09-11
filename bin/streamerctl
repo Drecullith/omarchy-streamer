@@ -32,10 +32,15 @@ privacy_enable() {
 
   local previous
   previous="$(notifications_dnd_state)"
-  printf '%s\n' "$previous" > "$PREV_DND_FILE"
+  if [[ "$previous" == "unknown" ]]; then
+    rm -f "$PREV_DND_FILE"
+    return 1
+  fi
 
-  if [[ "$previous" != "unknown" ]]; then
-    omarchy-shell notifications setDnd on >/dev/null 2>&1 || true
+  printf '%s\n' "$previous" > "$PREV_DND_FILE"
+  if ! omarchy-shell notifications setDnd on >/dev/null 2>&1; then
+    rm -f "$PREV_DND_FILE"
+    return 1
   fi
 
   : > "$PRIVACY_FILE"
@@ -60,7 +65,7 @@ privacy_disable() {
 
 mode_enable() {
   : > "$ACTIVE_FILE"
-  privacy_enable
+  privacy_enable || true
 }
 
 mode_disable() {
@@ -119,7 +124,12 @@ run_action() {
     mode.enable) mode_enable ;;
     mode.disable) mode_disable ;;
     mode.toggle) mode_toggle ;;
-    privacy.enable) privacy_enable ;;
+    privacy.enable)
+      if ! privacy_enable; then
+        printf 'error: Omarchy notification DND is unavailable; privacy mode was not enabled\n' >&2
+        exit 5
+      fi
+      ;;
     privacy.disable) privacy_disable ;;
     obs.launch) obs_launch ;;
     health.refresh) status_json ;;
