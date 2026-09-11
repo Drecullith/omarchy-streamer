@@ -14,6 +14,13 @@ Item {
   property bool obsRunning: false
   property bool pipewireReady: false
   property bool wpctlInstalled: false
+  property bool pythonReady: false
+  property bool obsWebSocketReady: false
+  property var streaming: null
+  property var recording: null
+  property var replayBuffer: null
+  property string currentScene: ""
+  property string obsWebSocketError: ""
   property string dndState: "unknown"
   property bool dndManaged: false
   property string lastAction: ""
@@ -22,13 +29,20 @@ Item {
 
   function snapshot() {
     return {
-      version: 1,
+      version: 2,
       active: root.active,
       privacy: root.privacy,
       obsInstalled: root.obsInstalled,
       obsRunning: root.obsRunning,
       pipewireReady: root.pipewireReady,
       wpctlInstalled: root.wpctlInstalled,
+      pythonReady: root.pythonReady,
+      obsWebSocketReady: root.obsWebSocketReady,
+      streaming: root.streaming,
+      recording: root.recording,
+      replayBuffer: root.replayBuffer,
+      currentScene: root.currentScene,
+      obsWebSocketError: root.obsWebSocketError,
       dndState: root.dndState,
       dndManaged: root.dndManaged,
       lastAction: root.lastAction,
@@ -39,12 +53,20 @@ Item {
   function applyStatus(raw) {
     try {
       var state = JSON.parse(String(raw || "{}"))
+      var obs = state.obsWebSocket || {}
       root.active = !!state.active
       root.privacy = !!state.privacy
       root.obsInstalled = !!state.obsInstalled
       root.obsRunning = !!state.obsRunning
       root.pipewireReady = !!state.pipewireReady
       root.wpctlInstalled = !!state.wpctlInstalled
+      root.pythonReady = !!state.pythonReady
+      root.obsWebSocketReady = !!obs.connected
+      root.streaming = obs.streaming === null || obs.streaming === undefined ? null : !!obs.streaming
+      root.recording = obs.recording === null || obs.recording === undefined ? null : !!obs.recording
+      root.replayBuffer = obs.replayBuffer === null || obs.replayBuffer === undefined ? null : !!obs.replayBuffer
+      root.currentScene = String(obs.currentScene || "")
+      root.obsWebSocketError = String(obs.error || "")
       root.dndState = String(state.dndState || "unknown")
       root.dndManaged = !!state.dndManaged
       root.lastError = ""
@@ -86,6 +108,8 @@ Item {
       case "stream.stop":
       case "record.start":
       case "record.stop":
+      case "replay.start":
+      case "replay.stop":
       case "clip.save":
       case "scene.set":
       case "mic.mute":
@@ -108,13 +132,13 @@ Item {
 
   Timer {
     id: delayedRefresh
-    interval: 350
+    interval: 500
     repeat: false
     onTriggered: root.refreshStatus()
   }
 
   Timer {
-    interval: 2500
+    interval: 3000
     repeat: true
     running: true
     triggeredOnStart: false
@@ -124,34 +148,13 @@ Item {
   IpcHandler {
     target: "io.github.drecullith.streamer"
 
-    function ping(): string {
-      return "ok"
-    }
-
-    function status(): string {
-      return JSON.stringify(root.snapshot())
-    }
-
-    function refresh(): string {
-      root.refreshStatus()
-      return "queued"
-    }
-
-    function action(name: string, arg: string): string {
-      return root.handleAction(name, arg)
-    }
-
-    function enable(): string {
-      return root.handleAction("mode.enable", "")
-    }
-
-    function disable(): string {
-      return root.handleAction("mode.disable", "")
-    }
-
-    function toggle(): string {
-      return root.handleAction("mode.toggle", "")
-    }
+    function ping(): string { return "ok" }
+    function status(): string { return JSON.stringify(root.snapshot()) }
+    function refresh(): string { root.refreshStatus(); return "queued" }
+    function action(name: string, arg: string): string { return root.handleAction(name, arg) }
+    function enable(): string { return root.handleAction("mode.enable", "") }
+    function disable(): string { return root.handleAction("mode.disable", "") }
+    function toggle(): string { return root.handleAction("mode.toggle", "") }
   }
 
   Component.onCompleted: root.refreshStatus()
