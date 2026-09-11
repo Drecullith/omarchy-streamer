@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-streamer"
+ACTIVE_FILE="$STATE_DIR/active"
+PRIVACY_FILE="$STATE_DIR/privacy"
+PREV_DND_FILE="$STATE_DIR/previous-dnd"
+
+mkdir -p "$STATE_DIR"
+
+have() { command -v "$1" >/dev/null 2>&1; }
+json_bool() { [[ "$1" == "true" ]] && printf 'true' || printf 'false'; }
+file_bool() { [[ -e "$1" ]] && printf 'true' || printf 'false'; }
+
+notifications_dnd_state() {
+  if ! have omarchy-shell; then
+    printf 'unknown'
+    return 0
+  fi
+  local state
+  state="$(omarchy-shell notifications dndState 2>/dev/null || true)"
+  case "$state" in
+    on|off) printf '%s' "$state" ;;
+    *) printf 'unknown' ;;
+  esac
+}
+
+privacy_enable() {
+  if [[ -e "$PRIVACY_FILE" ]]; then
+    return 0
+  fi
+
+  local previous
+  previous="$(notifications_dnd_state)"
+  printf '%s\n' "$previous" > "$PREV_DND_FILE"
+
+  if [[ "$previous" != "unknown" ]]; then
+    omarchy-shell notifications setDnd on >/dev/null 2>&1 || true
+  fi
+
+  : > "$PRIVACY_FILE"
+}
+
+privacy_disable() {
+  if [[ ! -e "$PRIVACY_FILE" ]]; then
+    return 0
+  fi
+
+  local previous="unknown"
+  [[ -r "$PREV_DND_FILE" ]] && previous="$(head -n 1 "$PREV_DND_FILE" 2>/dev/null || true)"
+
+  if have omarchy-shell; then
+    case "$previous" in
+      on|off) omarchy-shell notifications setDnd "$previous" >/dev/null 2>&1 || true ;;
+    esac
+  fi
+
+  rm -f "$PRIVACY_FILE" "$PREV_DND_FILE"
+}
+
+mode_enable() {
+  : > "$ACTIVE_FILE"
+  privacy_enable
+}
+
+mode_disable() {
+  privacy_disable
+  rm -f "$ACTIVE_FILE"
+}
+
+mode_toggle() {
+  if [[ -e "$ACTIVE_FILE" ]]; then mode_disable; else mode_enable; fi
+}
+
+obs_launch() {
+  if ! have obs; then
+    printf 'error: OBS Studio is not installed or not on PATH\n' >&2
+    exit 4
+  fi
+
+  if pgrep -x obs >/dev/null 2>&1; then
+    return 0
+  fi
+
+  nohup obs >/dev/null 2>&1 &
+}
+
+status_json() {
+  local active privacy obs_installed obs_running pipewire_ready wpctl_installed dnd_state dnd_managed
+  active="$(file_bool "$ACTIVE_FILE")"
+  privacy="$(file_bool "$PRIVACY_FILE")"
+  have obs && obs_installed=true || obs_installed=false
+  pgrep -x obs >/dev/null 2>&1 && obs_running=true || obs_running=false
+  pgrep -x pipewire >/dev/null 2>&1 && pipewire_ready=true || pipewire_ready=false
+  have wpctl && wpctl_installed=true || wpctl_installed=false
+  dnd_state="$(notifications_dnd_state)"
+  if [[ -r "$PREV_DND_FILE" ]] && [[ "$(head -n 1 "$PREV_DND_FILE" 2>/dev/null || true)" != "unknown" ]]; then
+    dnd_managed=true
+  else
+    dnd_managed=false
+  fi
+
+  printf '{"version":1,"active":%s,"privacy":%s,"obsInstalled":%s,"obsRunning":%s,"pipewireReady":%s,"wpctlInstalled":%s,"dndState":"%s","dndManaged":%s}\n' \
+    "$(json_bool "$active")" \
+    "$(json_bool "$privacy")" \
+    "$(json_bool "$obs_installed")" \
+    "$(json_bool "$obs_running")" \
+    "$(json_bool "$pipewire_ready")" \
+    "$(json_bool "$wpctl_installed")" \
+    "$dnd_state" \
+    "$(json_bool "$dnd_managed")"
+}
+
+run_action() {
+  local action="${1:-}"
+  local arg="${2:-}"
+
+  case "$action" in
+    mode.enable) mode_enable ;;
+    mode.disable) mode_disable ;;
+    mode.toggle) mode_toggle ;;
+    privacy.enable) privacy_enable ;;
+    privacy.disable) privacy_disable ;;
+    obs.launch) obs_launch ;;
+    health.refresh) status_json ;;
+
+    stream.start|stream.stop|record.start|record.stop|clip.save|scene.set|mic.mute|mic.unmute)
+      printf 'unsupported:v0.1:%s%s\n' "$action" "${arg:+:$arg}" >&2
+      exit 8
+      ;;
+
+    *)
+      printf 'error: unknown action: %s\n' "$action" >&2
+      exit 2
+      ;;
+  esac
+}
+
+case "${1:-status}" in
+  status|doctor)
+    status_json
+    ;;
+  action)
+    run_action "${2:-}" "${3:-}"
+    ;;
+  *)
+    printf 'usage: %s {status|doctor|action <name> [arg]}\n' "$0" >&2
+    exit 2
+    ;;
+esac
