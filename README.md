@@ -2,7 +2,7 @@
 
 An all-in-one Streamer Mode for **Omarchy Quattro**.
 
-Omarchy Streamer is designed to turn an Omarchy desktop into a deliberate creator/streaming workspace: OBS orchestration, PipeWire-aware audio health, privacy protection, recording/streaming controls, collaborator workflows, and a stable action surface that can later be controlled by **Lychnos**.
+Omarchy Streamer is designed to turn an Omarchy desktop into a deliberate creator/streaming workspace: OBS orchestration, PipeWire-aware audio health, privacy protection, recording/streaming controls, collaborator workflows, and a stable action surface for future integrations and automation.
 
 > Status: early **v0.1 baseline**. The lifecycle, privacy layer, OBS detection/launch, health model, bar UI, IPC boundary, and action contract are in place. Direct OBS stream/record/scene automation is intentionally stubbed until the audited OBS WebSocket adapter lands.
 
@@ -17,7 +17,7 @@ Omarchy Streamer is designed to turn an Omarchy desktop into a deliberate creato
 - preserves the user's previous DND state
 - OBS Studio detection and launch
 - PipeWire and `wpctl` health detection
-- stable action contract for future automation/Lychnos
+- stable action contract for future integrations and automation
 - no root requirement
 - no implicit `sudo`
 - no automatic package installation
@@ -65,7 +65,7 @@ omarchy-shell io.github.drecullith.streamer disable
 omarchy-shell io.github.drecullith.streamer action obs.launch ""
 ```
 
-The long-term automation vocabulary lives in [`contracts/actions-v1.json`](contracts/actions-v1.json). User UI, future integrations, and Lychnos should all use the same named actions rather than separate hidden control paths.
+The long-term automation vocabulary lives in [`contracts/actions-v1.json`](contracts/actions-v1.json). User UI and future integrations should all use the same named actions rather than separate hidden control paths.
 
 ## Planned actions
 
@@ -87,7 +87,7 @@ mic.unmute
 health.refresh
 ```
 
-Actions that can unexpectedly expose the user, start broadcasting, change a live scene, launch applications, or alter capture state are marked with explicit agent-confirmation requirements in the contract.
+Actions that can unexpectedly expose the user, start broadcasting, change a live scene, launch applications, or alter capture state are marked with explicit confirmation requirements in the contract.
 
 ## Architecture
 
@@ -100,7 +100,7 @@ BarWidget.qml
       │
       ├── user controls/status
       │
-Service.qml ── IPC ── future Lychnos / external tools
+Service.qml ── IPC ── external integrations
       │
       └── bin/streamerctl
               ├── reversible privacy state
@@ -140,21 +140,13 @@ Service.qml ── IPC ── future Lychnos / external tools
 - browser guest integration
 - later Mode700 integration
 
-### Later — Lychnos
+### Later — External integrations
 
-Lychnos will be able to inspect Streamer Mode health and request explicit actions through the same IPC/action contract. It will not receive an unrestricted shell backdoor through this plugin.
-
-Examples of the intended interaction:
-
-> “Lychnos, switch to the BRB scene.”
-
-> “Your microphone disappeared from PipeWire. Want me to switch to the backup mic?”
-
-> “OBS is open but Streamer Mode privacy is off. Enable it?”
+The IPC/action contract is intentionally stable so other local tools can inspect Streamer Mode health and request explicit actions without receiving unrestricted shell access.
 
 ## Safety principles
 
-Omarchy Streamer does **not** silently install packages, use root, modify firewall rules, store stream keys, or hand AI agents unrestricted command execution.
+Omarchy Streamer does **not** silently install packages, use root, modify firewall rules, store stream keys, or hand external automation unrestricted command execution.
 
 Every integration should be observable, reversible where practical, and explicit about missing dependencies or failed protections.
 
