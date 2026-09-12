@@ -29,6 +29,12 @@
     {"id":"safety.refresh","implemented":true,"agentConfirmation":"none","description":"Refresh Stream-Safe workspace and sensitive-window state"},
     {"id":"emergency.end-live","implemented":true,"agentConfirmation":"required","description":"Best-effort safety action: enable privacy, mute the selected mic, enter Stream-Safe, and stop the live stream"},
     {"id":"emergency.stop-all","implemented":true,"agentConfirmation":"required","description":"Best-effort safety action: enable privacy, mute the selected mic, enter Stream-Safe, and stop stream, recording, and replay buffer"},
+    {"id":"collab.create","implemented":true,"agentConfirmation":"session","description":"Create or reuse a password-protected browser collaboration room using the configured provider"},
+    {"id":"collab.rotate","implemented":true,"agentConfirmation":"required","description":"Replace the current collaboration room and invalidate previously copied room links"},
+    {"id":"collab.reset","implemented":true,"agentConfirmation":"required","description":"Delete the local collaboration room credentials"},
+    {"id":"collab.open-director","implemented":true,"agentConfirmation":"required","description":"Open the password-bearing collaboration director URL in the default browser"},
+    {"id":"collab.copy-invite","implemented":true,"agentConfirmation":"required","description":"Copy the password-bearing guest invite URL to the Wayland clipboard"},
+    {"id":"collab.copy-program","implemented":true,"agentConfirmation":"required","description":"Copy the password-bearing clean group scene URL for an OBS Browser Source"},
     {"id":"health.refresh","implemented":true,"agentConfirmation":"none","description":"Refresh streamer health and dependency state"}
   ]
 }
