@@ -47,7 +47,9 @@ BarWidget {
   property bool collaborationInviteReady: false
   property bool collaborationProgramUrlReady: false
   property bool collaborationManagedSlotsReady: false
+  property bool collaborationGuestControlReady: false
   property int collaborationSlotCount: 0
+  property var collaborationGuests: []
   property string collaborationObsSceneName: ""
   property string collaborationError: ""
   property int selectedGuestSlot: 1
@@ -63,9 +65,18 @@ BarWidget {
   readonly property bool micWarning: root.selectedSourceName !== "" && !root.selectedSourcePresent
   readonly property bool safetyWarning: root.captureActive && root.sensitiveActive
   readonly property string barLabel: root.live ? "LIVE" : (root.rec ? "REC" : (root.active ? "STREAM" : "Stream"))
+  readonly property var selectedGuestState: root.guestStateFor(root.selectedGuestSlot)
 
   implicitWidth: statusRow.implicitWidth + Style.space(14)
   implicitHeight: barSize
+
+  function guestStateFor(slotNumber) {
+    for (var i = 0; i < root.collaborationGuests.length; i++) {
+      var guest = root.collaborationGuests[i]
+      if (Number(guest.slot || 0) === Number(slotNumber)) return guest
+    }
+    return { slot: Number(slotNumber), online: null, micEnabled: null, stale: true, error: "" }
+  }
 
   function applyStatus(raw) {
     try {
@@ -110,7 +121,9 @@ BarWidget {
       root.collaborationInviteReady = !!collab.inviteReady
       root.collaborationProgramUrlReady = !!collab.programUrlReady
       root.collaborationManagedSlotsReady = !!collab.managedSlotsReady
+      root.collaborationGuestControlReady = !!collab.guestControlReady
       root.collaborationSlotCount = Number(collab.slotCount || 0)
+      root.collaborationGuests = Array.isArray(collab.guests) ? collab.guests : []
       root.collaborationObsSceneName = String(collab.obsSceneName || "")
       root.collaborationError = String(collab.error || "")
       if (root.collaborationSlotCount > 0 && root.selectedGuestSlot > root.collaborationSlotCount) root.selectedGuestSlot = root.collaborationSlotCount
@@ -141,6 +154,10 @@ BarWidget {
         case "collab.slot-rotate": root.actionMessage = "Guest " + data.slot + " link rotated"; return
         case "collab.obs-add-program": root.actionMessage = "Guest group added to OBS"; return
         case "collab.obs-add-slot": root.actionMessage = "Guest " + data.slot + " added to OBS"; return
+        case "collab.guest-refresh": root.actionMessage = "Guest presence refreshed"; return
+        case "collab.guest-mute": root.actionMessage = "Guest " + data.slot + " microphone muted"; return
+        case "collab.guest-unmute": root.actionMessage = "Guest " + data.slot + " microphone unmuted"; return
+        case "collab.guest-disconnect": root.actionMessage = "Guest " + data.slot + " disconnected"; return
         case "onboarding.open": root.actionMessage = "Guide opened"; return
       }
     } catch (e) {}
@@ -360,6 +377,42 @@ BarWidget {
         Text { width: parent.width - Style.space(168); height: Style.space(36); text: "Guest " + root.selectedGuestSlot; color: Color.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body; verticalAlignment: Text.AlignVCenter; horizontalAlignment: Text.AlignHCenter }
         StreamerButton { width: Style.space(80); fontFamily: root.bar.fontFamily; label: "Guest →"; onClicked: root.shiftGuest(1) }
       }
+
+      Text {
+        visible: root.collaborationActive && root.collaborationManagedSlotsReady
+        width: parent.width
+        text: root.selectedGuestState.online === true
+              ? ("● ONLINE" + (root.selectedGuestState.stale ? " · STALE" : "") + (root.selectedGuestState.micEnabled === false ? " · MIC MUTED" : (root.selectedGuestState.micEnabled === true ? " · MIC ON" : "")))
+              : (root.selectedGuestState.online === false ? "○ OFFLINE" : (root.selectedGuestState.error === "connection" ? "• CONTROL UNAVAILABLE" : "• STATUS UNKNOWN"))
+        color: root.selectedGuestState.online === true && !root.selectedGuestState.stale ? Color.accent : (root.selectedGuestState.error ? Color.urgent : Color.foreground)
+        font.family: root.bar.fontFamily
+        font.pixelSize: Style.font.bodySmall
+        font.bold: root.selectedGuestState.online === true
+      }
+
+      Row {
+        visible: root.collaborationActive && root.collaborationManagedSlotsReady
+        width: parent.width; spacing: Style.space(8)
+        StreamerButton { width: (parent.width-parent.spacing)/2; fontFamily: root.bar.fontFamily; label: "Refresh Guests"; available: root.collaborationGuestControlReady; onClicked: root.runAction("collab.guest-refresh") }
+        StreamerButton {
+          width: (parent.width-parent.spacing)/2
+          fontFamily: root.bar.fontFamily
+          label: root.selectedGuestState.micEnabled === false ? "Unmute Guest" : "Mute Guest"
+          available: root.selectedGuestState.online === true
+          danger: root.selectedGuestState.micEnabled === false
+          onClicked: root.runAction(root.selectedGuestState.micEnabled === false ? "collab.guest-unmute" : "collab.guest-mute", root.selectedGuestSlot)
+        }
+      }
+      StreamerButton {
+        visible: root.collaborationActive && root.collaborationManagedSlotsReady
+        width: parent.width
+        fontFamily: root.bar.fontFamily
+        label: "Disconnect Guest " + root.selectedGuestSlot
+        available: root.selectedGuestState.online === true
+        danger: true
+        onClicked: root.runAction("collab.guest-disconnect", root.selectedGuestSlot)
+      }
+
       Row {
         visible: root.collaborationActive && root.collaborationManagedSlotsReady
         width: parent.width; spacing: Style.space(8)
@@ -388,7 +441,7 @@ BarWidget {
       }
       Text {
         width: parent.width
-        text: "Managed slot invites carry private stream/control IDs. Status never exposes them. Live guest presence is not claimed until provider control is verified."
+        text: "Guest presence requires a callback from that guest page and becomes stale after 30 seconds. Private room, stream and page-control IDs never appear in status."
         color: Qt.darker(Color.foreground,1.25)
         font.family: root.bar.fontFamily
         font.pixelSize: Style.font.caption
@@ -445,7 +498,7 @@ BarWidget {
 
       Text { visible: root.obsRunning && !root.obsWebSocketReady && root.obsWebSocketError !== ""; width: parent.width; text: "OBS control: " + root.obsWebSocketError; color: Color.urgent; font.family: root.bar.fontFamily; font.pixelSize: Style.font.caption; wrapMode: Text.Wrap }
       Text { visible: root.actionMessage !== ""; width: parent.width; text: root.actionMessage; color: root.actionMessage.indexOf("error:") === 0 ? Color.urgent : Color.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.caption; wrapMode: Text.Wrap }
-      Text { width: parent.width; text: "v0.7 Guided Onboarding · live preflight · full user manual"; color: Qt.darker(Color.foreground,1.35); font.family: root.bar.fontFamily; font.pixelSize: Style.font.caption; wrapMode: Text.Wrap }
+      Text { width: parent.width; text: "v0.8 Guest Control · callback presence · remote mic · disconnect"; color: Qt.darker(Color.foreground,1.35); font.family: root.bar.fontFamily; font.pixelSize: Style.font.caption; wrapMode: Text.Wrap }
     }
   }
 
