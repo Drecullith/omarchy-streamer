@@ -48,6 +48,9 @@ Item {
   property bool collaborationBrowserReady: false
   property bool collaborationInviteReady: false
   property bool collaborationProgramUrlReady: false
+  property bool collaborationManagedSlotsReady: false
+  property int collaborationSlotCount: 0
+  property string collaborationObsSceneName: ""
   property string collaborationError: ""
 
   property string dndState: "unknown"
@@ -57,7 +60,7 @@ Item {
 
   function snapshot() {
     return {
-      version: 5,
+      version: 6,
       active: root.active,
       privacy: root.privacy,
       obsInstalled: root.obsInstalled,
@@ -94,6 +97,9 @@ Item {
       collaborationBrowserReady: root.collaborationBrowserReady,
       collaborationInviteReady: root.collaborationInviteReady,
       collaborationProgramUrlReady: root.collaborationProgramUrlReady,
+      collaborationManagedSlotsReady: root.collaborationManagedSlotsReady,
+      collaborationSlotCount: root.collaborationSlotCount,
+      collaborationObsSceneName: root.collaborationObsSceneName,
       collaborationError: root.collaborationError,
       dndState: root.dndState,
       dndManaged: root.dndManaged,
@@ -150,6 +156,9 @@ Item {
       root.collaborationBrowserReady = !!collab.browserReady
       root.collaborationInviteReady = !!collab.inviteReady
       root.collaborationProgramUrlReady = !!collab.programUrlReady
+      root.collaborationManagedSlotsReady = !!collab.managedSlotsReady
+      root.collaborationSlotCount = Number(collab.slotCount || 0)
+      root.collaborationObsSceneName = String(collab.obsSceneName || "")
       root.collaborationError = String(collab.error || "")
 
       root.dndState = String(state.dndState || "unknown")
@@ -168,10 +177,8 @@ Item {
   function queueAction(name, arg) {
     var actionName = String(name || "")
     if (actionName === "") return "invalid-action"
-
     var argv = ["bash", root.helperPath, "action", actionName]
     if (arg !== undefined && arg !== null && String(arg) !== "") argv.push(String(arg))
-
     root.lastAction = actionName
     root.lastError = ""
     Quickshell.execDetached(argv)
@@ -214,6 +221,11 @@ Item {
       case "collab.open-director":
       case "collab.copy-invite":
       case "collab.copy-program":
+      case "collab.slot-rotate":
+      case "collab.copy-slot-invite":
+      case "collab.copy-slot-source":
+      case "collab.obs-add-program":
+      case "collab.obs-add-slot":
         return root.queueAction(name, arg)
       default:
         return "unknown-action"
@@ -224,30 +236,14 @@ Item {
     id: statusProc
     command: ["bash", root.helperPath, "status"]
     running: false
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: root.applyStatus(text)
-    }
+    stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.applyStatus(text) }
   }
 
-  Timer {
-    id: delayedRefresh
-    interval: 500
-    repeat: false
-    onTriggered: root.refreshStatus()
-  }
-
-  Timer {
-    interval: 3000
-    repeat: true
-    running: true
-    triggeredOnStart: false
-    onTriggered: root.refreshStatus()
-  }
+  Timer { id: delayedRefresh; interval: 500; repeat: false; onTriggered: root.refreshStatus() }
+  Timer { interval: 3000; repeat: true; running: true; triggeredOnStart: false; onTriggered: root.refreshStatus() }
 
   IpcHandler {
     target: "io.github.drecullith.streamer"
-
     function ping(): string { return "ok" }
     function status(): string { return JSON.stringify(root.snapshot()) }
     function refresh(): string { root.refreshStatus(); return "queued" }
