@@ -53,6 +53,12 @@ Item {
   property string collaborationObsSceneName: ""
   property string collaborationError: ""
 
+  property bool onboardingReady: false
+  property bool onboardingComplete: false
+  property int onboardingTourVersion: 0
+  property string onboardingError: ""
+  property bool onboardingSummoned: false
+
   property string dndState: "unknown"
   property bool dndManaged: false
   property string lastAction: ""
@@ -60,7 +66,7 @@ Item {
 
   function snapshot() {
     return {
-      version: 6,
+      version: 7,
       active: root.active,
       privacy: root.privacy,
       obsInstalled: root.obsInstalled,
@@ -101,6 +107,10 @@ Item {
       collaborationSlotCount: root.collaborationSlotCount,
       collaborationObsSceneName: root.collaborationObsSceneName,
       collaborationError: root.collaborationError,
+      onboardingReady: root.onboardingReady,
+      onboardingComplete: root.onboardingComplete,
+      onboardingTourVersion: root.onboardingTourVersion,
+      onboardingError: root.onboardingError,
       dndState: root.dndState,
       dndManaged: root.dndManaged,
       lastAction: root.lastAction,
@@ -115,6 +125,7 @@ Item {
       var audio = state.audio || {}
       var safety = state.safety || {}
       var collab = state.collaboration || {}
+      var onboarding = state.onboarding || {}
 
       root.active = !!state.active
       root.privacy = !!state.privacy
@@ -160,6 +171,13 @@ Item {
       root.collaborationSlotCount = Number(collab.slotCount || 0)
       root.collaborationObsSceneName = String(collab.obsSceneName || "")
       root.collaborationError = String(collab.error || "")
+
+      root.onboardingReady = !!onboarding.ready
+      root.onboardingComplete = !!onboarding.completed
+      root.onboardingTourVersion = Number(onboarding.tourVersion || 0)
+      root.onboardingError = String(onboarding.error || "")
+      if (root.onboardingReady && !root.onboardingComplete && !root.onboardingSummoned && !onboardingTimer.running)
+        onboardingTimer.start()
 
       root.dndState = String(state.dndState || "unknown")
       root.dndManaged = !!state.dndManaged
@@ -226,6 +244,9 @@ Item {
       case "collab.copy-slot-source":
       case "collab.obs-add-program":
       case "collab.obs-add-slot":
+      case "onboarding.open":
+      case "onboarding.complete":
+      case "onboarding.reset":
         return root.queueAction(name, arg)
       default:
         return "unknown-action"
@@ -240,6 +261,17 @@ Item {
   }
 
   Timer { id: delayedRefresh; interval: 500; repeat: false; onTriggered: root.refreshStatus() }
+  Timer {
+    id: onboardingTimer
+    interval: 1500
+    repeat: false
+    onTriggered: {
+      if (!root.onboardingComplete && !root.onboardingSummoned) {
+        root.onboardingSummoned = true
+        Quickshell.execDetached(["bash", root.helperPath, "action", "onboarding.open", "first-run"])
+      }
+    }
+  }
   Timer { interval: 3000; repeat: true; running: true; triggeredOnStart: false; onTriggered: root.refreshStatus() }
 
   IpcHandler {
