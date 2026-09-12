@@ -2,11 +2,11 @@
 
 An all-in-one Streamer Mode for **Omarchy Quattro**.
 
-Omarchy Streamer turns an Omarchy desktop into a deliberate creator/streaming workspace: OBS orchestration, PipeWire-aware health, reversible privacy protection, recording/streaming controls, collaborator workflows, and a stable action surface for future integrations and automation.
+Omarchy Streamer turns an Omarchy desktop into a deliberate creator/streaming workspace: OBS orchestration, PipeWire-aware audio control, reversible privacy protection, recording/streaming controls, collaborator workflows, and a stable action surface for future integrations and automation.
 
-> Status: early **v0.2**. Streamer Mode lifecycle, privacy, OBS WebSocket control, health state, bar UI, IPC, and the action contract are in place. Audio routing and microphone control are the next major subsystem.
+> Status: early **v0.3**. Streamer Mode lifecycle, privacy, OBS WebSocket control, Audio Desk, health state, bar UI, IPC, and the action contract are in place. Deeper per-application routing and stream-safe workspace protection remain future work.
 
-## Current v0.2
+## Current v0.3
 
 - Omarchy Quattro third-party plugin
 - bar widget + popup control panel
@@ -22,13 +22,17 @@ Omarchy Streamer turns an Omarchy desktop into a deliberate creator/streaming wo
 - current-scene status and scene switching
 - LIVE / REC bar state based on OBS, not just local mode state
 - warning when capture is active while Streamer Privacy is off
-- PipeWire and `wpctl` health detection
+- PipeWire / WirePlumber Audio Desk
+- microphone discovery and remembered selection
+- microphone mute/unmute/toggle
+- microphone volume control
+- missing-microphone warning without silently substituting another source
 - stable action contract for future integrations and automation
 - no root requirement
 - no implicit `sudo`
 - no automatic package installation
 - no stream keys stored by the plugin
-- CI tests for the manifest, controller, action contract, and OBS WebSocket RPC path
+- CI tests for manifest, controller, action contract, OBS WebSocket RPC, and Audio Desk behavior
 
 ## Install on Omarchy Quattro
 
@@ -43,8 +47,8 @@ Third-party Omarchy plugins are installed disabled so their code can be reviewed
 
 - Omarchy Quattro
 - OBS Studio 28+ (obs-websocket is built in)
-- Python 3 for the small local OBS protocol adapter
-- PipeWire for the intended audio stack
+- Python 3 for the small local protocol/controllers
+- PipeWire + WirePlumber `wpctl` for Audio Desk
 
 Omarchy Streamer **detects** missing requirements. It does not silently install them.
 
@@ -63,10 +67,34 @@ The popup currently provides:
 - Replay buffer start/stop
 - Save Clip
 - Set Scene
+- microphone selection/cycling
+- microphone mute/unmute
+- microphone volume ±5%
 - Privacy on/off
-- OBS/PipeWire/privacy health
+- OBS/PipeWire/audio/privacy health
 
 When OBS reports a live stream the bar shows **LIVE**. During local recording it shows **REC**.
+
+## Audio Desk
+
+Audio Desk uses WirePlumber's `wpctl` interface. It discovers audio source nodes, remembers the chosen microphone by its PipeWire node name, and resolves the current node ID each time.
+
+This matters because PipeWire numeric object IDs may change between sessions or reconnects.
+
+Selecting a microphone in Omarchy Streamer **does not silently change the desktop-wide default microphone**. The chosen source is the one Streamer controls directly. If a previously selected microphone disappears, Streamer reports it as missing rather than quietly switching to another source.
+
+Available Audio Desk actions include:
+
+```text
+mic.select <sourceNameOrId>
+mic.next
+mic.mute
+mic.unmute
+mic.toggle
+mic.volume <0-150>
+```
+
+Deeper game/browser/collaborator routing is planned after real-hardware validation.
 
 ## Streamer Privacy
 
@@ -83,7 +111,7 @@ This is the first privacy layer, not the final one. Stronger capture/workspace p
 
 ## OBS WebSocket security
 
-The v0.2 adapter speaks the OBS WebSocket v5 protocol directly using Python's standard library. It does not require a third-party Python package.
+The OBS adapter speaks the OBS WebSocket v5 protocol directly using Python's standard library. It does not require a third-party Python package.
 
 By default it:
 
@@ -110,36 +138,12 @@ omarchy-shell io.github.drecullith.streamer ping
 omarchy-shell io.github.drecullith.streamer status
 omarchy-shell io.github.drecullith.streamer enable
 omarchy-shell io.github.drecullith.streamer disable
-omarchy-shell io.github.drecullith.streamer action obs.launch ""
 omarchy-shell io.github.drecullith.streamer action stream.start ""
 omarchy-shell io.github.drecullith.streamer action scene.set "BRB"
+omarchy-shell io.github.drecullith.streamer action mic.mute ""
 ```
 
 The stable automation vocabulary lives in [`contracts/actions-v1.json`](contracts/actions-v1.json). User UI and future integrations should use the same named actions rather than separate hidden control paths.
-
-## Action vocabulary
-
-```text
-mode.enable
-mode.disable
-mode.toggle
-privacy.enable
-privacy.disable
-obs.launch
-stream.start
-stream.stop
-record.start
-record.stop
-replay.start
-replay.stop
-clip.save
-scene.set <sceneName>
-mic.mute          # planned v0.3
-mic.unmute        # planned v0.3
-health.refresh
-```
-
-Actions that can unexpectedly expose the user, start broadcasting, change a live scene, launch applications, or alter capture state are marked with explicit confirmation requirements in the contract.
 
 ## Architecture
 
@@ -154,20 +158,11 @@ Service.qml ── IPC ── external integrations
       │
       └── bin/streamerctl
               ├── reversible privacy state
-              ├── dependency/health detection
-              └── bin/obsws.py ── localhost OBS WebSocket v5
+              ├── bin/obsws.py   ── localhost OBS WebSocket v5
+              └── bin/audioctl.py ── WirePlumber/wpctl Audio Desk
 ```
 
 ## Roadmap
-
-### v0.3 — Audio desk
-
-- microphone selection
-- mic mute/unmute
-- PipeWire routing
-- game/browser/collaborator source awareness
-- missing-device warnings
-- per-source health/status
 
 ### v0.4 — Stream-safe workspace
 
@@ -176,6 +171,7 @@ Service.qml ── IPC ── external integrations
 - optional capture allowlists
 - stream-safe workspace/profile behavior
 - emergency stop/mute controls
+- deeper PipeWire routing for game/browser/collaborator sources
 
 ### v0.5 — Collaboration
 
@@ -189,7 +185,7 @@ The IPC/action contract is intentionally stable so other local tools can inspect
 
 ## Safety principles
 
-Omarchy Streamer does **not** silently install packages, use root, modify firewall rules, store stream keys, or hand external automation unrestricted command execution.
+Omarchy Streamer does **not** silently install packages, use root, modify firewall rules, store stream keys, silently replace a missing selected microphone, or hand external automation unrestricted command execution.
 
 Every integration should be observable, reversible where practical, and explicit about missing dependencies or failed protections.
 
