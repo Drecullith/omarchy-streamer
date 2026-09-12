@@ -23,6 +23,12 @@
     {"id":"mic.unmute","implemented":true,"agentConfirmation":"session","description":"Unmute the selected microphone"},
     {"id":"mic.toggle","implemented":true,"agentConfirmation":"session","description":"Toggle mute on the selected microphone"},
     {"id":"mic.volume","implemented":true,"agentConfirmation":"session","argument":"percent","description":"Set selected microphone volume from 0 to 150 percent"},
+    {"id":"workspace.enter","implemented":true,"agentConfirmation":"required","description":"Switch to the dedicated Stream-Safe workspace while remembering the current workspace"},
+    {"id":"workspace.exit","implemented":true,"agentConfirmation":"session","description":"Return to the workspace remembered before entering Stream-Safe"},
+    {"id":"window.check","implemented":true,"agentConfirmation":"none","description":"Check the active Hyprland window against sensitive-window warning rules"},
+    {"id":"safety.refresh","implemented":true,"agentConfirmation":"none","description":"Refresh Stream-Safe workspace and sensitive-window state"},
+    {"id":"emergency.end-live","implemented":true,"agentConfirmation":"required","description":"Best-effort safety action: enable privacy, mute the selected mic, enter Stream-Safe, and stop the live stream"},
+    {"id":"emergency.stop-all","implemented":true,"agentConfirmation":"required","description":"Best-effort safety action: enable privacy, mute the selected mic, enter Stream-Safe, and stop stream, recording, and replay buffer"},
     {"id":"health.refresh","implemented":true,"agentConfirmation":"none","description":"Refresh streamer health and dependency state"}
   ]
 }
