@@ -120,10 +120,7 @@ BarWidget {
     } catch (e) {}
   }
 
-  function refreshStatus() {
-    if (statusProc.running) return
-    statusProc.running = true
-  }
+  function refreshStatus() { if (!statusProc.running) statusProc.running = true }
 
   function feedback(raw) {
     var text = String(raw || "").trim()
@@ -144,6 +141,7 @@ BarWidget {
         case "collab.slot-rotate": root.actionMessage = "Guest " + data.slot + " link rotated"; return
         case "collab.obs-add-program": root.actionMessage = "Guest group added to OBS"; return
         case "collab.obs-add-slot": root.actionMessage = "Guest " + data.slot + " added to OBS"; return
+        case "onboarding.open": root.actionMessage = "Guide opened"; return
       }
     } catch (e) {}
     root.actionMessage = text
@@ -224,7 +222,7 @@ BarWidget {
     cursorShape: Qt.PointingHandCursor
     acceptedButtons: Qt.LeftButton | Qt.RightButton
     onClicked: function(mouse) { if (mouse.button === Qt.RightButton) root.runAction("mode.toggle"); else root.popupOpen = !root.popupOpen }
-    onEntered: if (root.bar) root.bar.showTooltip(root, root.live ? "LIVE — click for stream controls" : (root.rec ? "Recording — click for controls" : "Streamer Mode"))
+    onEntered: if (root.bar) root.bar.showTooltip(root, root.live ? "LIVE — click for stream controls" : (root.rec ? "Recording — click for controls" : "Streamer Mode · left-click controls · right-click toggle"))
     onExited: if (root.bar) root.bar.hideTooltip(root)
   }
 
@@ -266,7 +264,12 @@ BarWidget {
       Text { visible: root.privacyWarning; width: parent.width; text: "⚠ Capture is active while Streamer Privacy is OFF"; color: Color.urgent; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body; font.bold: true; wrapMode: Text.Wrap }
       Text { visible: root.safetyWarning; width: parent.width; text: "⚠ Sensitive window is active while capture is running" + (root.activeWindowClass ? " · " + root.activeWindowClass : ""); color: Color.urgent; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body; font.bold: true; wrapMode: Text.Wrap }
 
-      StreamerButton { width: parent.width; fontFamily: root.bar.fontFamily; label: root.active ? "Disable Streamer Mode" : "Enable Streamer Mode"; onClicked: root.runAction("mode.toggle") }
+      Row {
+        width: parent.width
+        spacing: Style.space(8)
+        StreamerButton { width: (parent.width-parent.spacing)*0.68; fontFamily: root.bar.fontFamily; label: root.active ? "Disable Streamer Mode" : "Enable Streamer Mode"; onClicked: root.runAction("mode.toggle") }
+        StreamerButton { width: (parent.width-parent.spacing)*0.32; fontFamily: root.bar.fontFamily; label: "Guide"; onClicked: root.runAction("onboarding.open", "tour") }
+      }
 
       Text { width: parent.width; text: "Emergency"; color: Color.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
       Row {
@@ -442,7 +445,7 @@ BarWidget {
 
       Text { visible: root.obsRunning && !root.obsWebSocketReady && root.obsWebSocketError !== ""; width: parent.width; text: "OBS control: " + root.obsWebSocketError; color: Color.urgent; font.family: root.bar.fontFamily; font.pixelSize: Style.font.caption; wrapMode: Text.Wrap }
       Text { visible: root.actionMessage !== ""; width: parent.width; text: root.actionMessage; color: root.actionMessage.indexOf("error:") === 0 ? Color.urgent : Color.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.caption; wrapMode: Text.Wrap }
-      Text { width: parent.width; text: "v0.6 Managed Guests · per-guest links · one-click OBS browser sources"; color: Qt.darker(Color.foreground,1.35); font.family: root.bar.fontFamily; font.pixelSize: Style.font.caption; wrapMode: Text.Wrap }
+      Text { width: parent.width; text: "v0.7 Guided Onboarding · live preflight · full user manual"; color: Qt.darker(Color.foreground,1.35); font.family: root.bar.fontFamily; font.pixelSize: Style.font.caption; wrapMode: Text.Wrap }
     }
   }
 
