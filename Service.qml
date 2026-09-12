@@ -61,6 +61,14 @@ Item {
   property string onboardingError: ""
   property bool onboardingSummoned: false
 
+  property bool profileReady: false
+  property string activeProfile: "gaming"
+  property string activeProfileLabel: "Gaming"
+  property int guestRefreshSeconds: 30
+  property string profileGuestLayout: "auto"
+  property bool profilePrivacyRecommended: true
+  property string profileError: ""
+
   property string dndState: "unknown"
   property bool dndManaged: false
   property string lastAction: ""
@@ -68,7 +76,7 @@ Item {
 
   function snapshot() {
     return {
-      version: 8,
+      version: 9,
       active: root.active,
       privacy: root.privacy,
       obsInstalled: root.obsInstalled,
@@ -115,6 +123,13 @@ Item {
       onboardingComplete: root.onboardingComplete,
       onboardingTourVersion: root.onboardingTourVersion,
       onboardingError: root.onboardingError,
+      profileReady: root.profileReady,
+      activeProfile: root.activeProfile,
+      activeProfileLabel: root.activeProfileLabel,
+      guestRefreshSeconds: root.guestRefreshSeconds,
+      profileGuestLayout: root.profileGuestLayout,
+      profilePrivacyRecommended: root.profilePrivacyRecommended,
+      profileError: root.profileError,
       dndState: root.dndState,
       dndManaged: root.dndManaged,
       lastAction: root.lastAction,
@@ -130,6 +145,7 @@ Item {
       var safety = state.safety || {}
       var collab = state.collaboration || {}
       var onboarding = state.onboarding || {}
+      var profiles = state.profiles || {}
 
       root.active = !!state.active
       root.privacy = !!state.privacy
@@ -184,6 +200,14 @@ Item {
       root.onboardingError = String(onboarding.error || "")
       if (root.onboardingReady && !root.onboardingComplete && !root.onboardingSummoned && !onboardingTimer.running)
         onboardingTimer.start()
+
+      root.profileReady = !!profiles.ready
+      root.activeProfile = String(profiles.active || "gaming")
+      root.activeProfileLabel = String(profiles.activeLabel || "Gaming")
+      root.guestRefreshSeconds = Math.max(10, Number(profiles.guestRefreshSeconds || 30))
+      root.profileGuestLayout = String(profiles.guestLayout || "auto")
+      root.profilePrivacyRecommended = profiles.privacyRecommended !== false
+      root.profileError = String(profiles.error || "")
 
       root.dndState = String(state.dndState || "unknown")
       root.dndManaged = !!state.dndManaged
@@ -254,6 +278,11 @@ Item {
       case "collab.guest-mute":
       case "collab.guest-unmute":
       case "collab.guest-disconnect":
+      case "collab.layout":
+      case "profile.apply":
+      case "profile.next":
+      case "profile.previous":
+      case "profile.layout":
       case "onboarding.open":
       case "onboarding.complete":
       case "onboarding.reset":
@@ -291,7 +320,7 @@ Item {
   }
   Timer {
     id: guestRefreshTimer
-    interval: 15000
+    interval: Math.max(10000, root.guestRefreshSeconds * 1000)
     repeat: true
     running: root.collaborationActive && root.collaborationGuestControlReady
     triggeredOnStart: true
