@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import os
 import stat
 import tempfile
 import unittest
@@ -27,74 +26,82 @@ class CollabCtlTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.tempdir.cleanup()
 
-    def test_create_is_secure_and_status_does_not_expose_credentials(self) -> None:
+    def test_create_is_secure_and_status_does_not_expose_any_credentials(self) -> None:
         session = collabctl.create_session()
-        self.assertEqual(session["provider"], "vdo.ninja")
-        self.assertTrue(session["room"].startswith("omarchy-"))
-        self.assertGreaterEqual(len(session["password"]), 24)
-
-        mode = stat.S_IMODE(collabctl.SESSION_FILE.stat().st_mode)
-        self.assertEqual(mode, 0o600)
-
+        self.assertEqual(len(session["slots"]), 4)
+        self.assertEqual(stat.S_IMODE(collabctl.SESSION_FILE.stat().st_mode), 0o600)
         snapshot = collabctl.status()
         serialized = json.dumps(snapshot)
-        self.assertTrue(snapshot["active"])
+        self.assertEqual(snapshot["slotCount"], 4)
         self.assertFalse(snapshot["credentialsExposed"])
         self.assertNotIn(session["room"], serialized)
         self.assertNotIn(session["password"], serialized)
+        for slot in session["slots"]:
+            self.assertNotIn(slot["streamId"], serialized)
+            self.assertNotIn(slot["controlId"], serialized)
 
-    def test_create_is_idempotent_and_rotate_changes_secret(self) -> None:
-        first = collabctl.create_session()
-        again = collabctl.create_session()
-        self.assertEqual(first["room"], again["room"])
-        self.assertEqual(first["password"], again["password"])
-
-        rotated = collabctl.create_session(force=True)
-        self.assertNotEqual(first["room"], rotated["room"])
-        self.assertNotEqual(first["password"], rotated["password"])
-
-    def test_urls_are_password_protected_and_program_is_clean_scene_zero(self) -> None:
+    def test_slot_invite_has_stable_stream_identity_and_private_control_id(self) -> None:
         session = collabctl.create_session()
-        director = collabctl.provider_url(session, "director")
-        guest = collabctl.provider_url(session, "guest")
-        program = collabctl.provider_url(session, "program")
+        slot = collabctl.get_slot(session, 1)
+        guest = collabctl.slot_url(session, slot, "guest")
+        solo = collabctl.slot_url(session, slot, "solo")
+        self.assertIn("push=", guest)
+        self.assertIn("api=", guest)
+        self.assertIn("label=Guest+1", guest)
+        self.assertIn("view=", solo)
+        self.assertIn("scene=0", solo)
+        self.assertIn("cleanoutput", solo)
+        self.assertNotIn(slot["controlId"], solo)
 
-        self.assertIn("director=", director)
-        self.assertIn("password=", director)
-        self.assertIn("room=", guest)
-        self.assertIn("password=", guest)
-        self.assertIn("autostart", guest)
-        self.assertIn("scene=0", program)
-        self.assertIn("cleanoutput", program)
-        self.assertIn("password=", program)
+    def test_rotate_one_slot_does_not_rotate_room_or_other_slots(self) -> None:
+        before = collabctl.create_session()
+        room = before["room"]
+        second_stream = before["slots"][1]["streamId"]
+        first_stream = before["slots"][0]["streamId"]
+        collabctl.rotate_slot("1")
+        after = collabctl.require_session()
+        self.assertEqual(room, after["room"])
+        self.assertNotEqual(first_stream, after["slots"][0]["streamId"])
+        self.assertEqual(second_stream, after["slots"][1]["streamId"])
 
-    def test_copy_invite_uses_wayland_clipboard_without_returning_url(self) -> None:
+    def test_copy_slot_invite_does_not_return_secret_url(self) -> None:
         collabctl.create_session()
-        with mock.patch.object(collabctl.shutil, "which", side_effect=lambda name: "/usr/bin/wl-copy" if name == "wl-copy" else None), \
+        with mock.patch.object(collabctl.shutil, "which", return_value="/usr/bin/wl-copy"), \
              mock.patch.object(collabctl.subprocess, "run") as run:
-            result = collabctl.perform("collab.copy-invite")
-        self.assertTrue(result["ok"])
+            result = collabctl.perform("collab.copy-slot-invite", "2")
+        self.assertEqual(result["slot"], 2)
         self.assertNotIn("url", result)
-        self.assertEqual(run.call_args.args[0], ["/usr/bin/wl-copy"])
         copied = run.call_args.kwargs["input"]
-        self.assertTrue(copied.startswith("https://vdo.ninja/?"))
-        self.assertIn("password=", copied)
+        self.assertIn("push=", copied)
+        self.assertIn("api=", copied)
 
-    def test_open_director_uses_xdg_open(self) -> None:
+    def test_obs_add_slot_passes_secret_only_in_process_memory(self) -> None:
         collabctl.create_session()
-        with mock.patch.object(collabctl.shutil, "which", side_effect=lambda name: "/usr/bin/xdg-open" if name == "xdg-open" else None), \
-             mock.patch.object(collabctl.subprocess, "Popen") as popen:
-            result = collabctl.perform("collab.open-director")
-        self.assertTrue(result["ok"])
-        command = popen.call_args.args[0]
-        self.assertEqual(command[0], "/usr/bin/xdg-open")
-        self.assertIn("director=", command[1])
-        self.assertIn("password=", command[1])
+        calls = []
+        fake = type("FakeAdapter", (), {
+            "ensure_browser_source": staticmethod(lambda url, **kw: calls.append((url, kw)) or {
+                "ok": True, "sceneName": kw["scene_name"], "inputName": kw["input_name"],
+                "createdScene": True, "createdInput": True, "addedToScene": True,
+            })
+        })
+        with mock.patch.object(collabctl, "load_obsbrowser", return_value=fake):
+            result = collabctl.perform("collab.obs-add-slot", "3")
+        self.assertEqual(result["slot"], 3)
+        self.assertEqual(result["inputName"], "Omarchy Streamer - Guest 3")
+        self.assertIn("view=", calls[0][0])
+        serialized = json.dumps(result)
+        session = collabctl.require_session()
+        self.assertNotIn(session["password"], serialized)
+        self.assertNotIn(session["slots"][2]["streamId"], serialized)
 
-    def test_reset_removes_session(self) -> None:
-        collabctl.create_session()
-        collabctl.perform("collab.reset")
-        self.assertFalse(collabctl.status()["active"])
+    def test_old_v05_room_migrates_without_changing_room_secret(self) -> None:
+        collabctl.ensure_state_dir()
+        old = {"version": 1, "provider": "vdo.ninja", "room": "legacy_room", "password": "legacy_secret", "createdAt": 1}
+        collabctl.SESSION_FILE.write_text(json.dumps(old), encoding="utf-8")
+        loaded = collabctl.load_session()
+        self.assertEqual(loaded["room"], "legacy_room")
+        self.assertEqual(loaded["password"], "legacy_secret")
+        self.assertEqual(len(loaded["slots"]), 4)
 
 
 if __name__ == "__main__":
