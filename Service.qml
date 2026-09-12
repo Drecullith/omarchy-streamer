@@ -21,6 +21,16 @@ Item {
   property var replayBuffer: null
   property string currentScene: ""
   property string obsWebSocketError: ""
+
+  property bool audioReady: false
+  property var audioSources: []
+  property string selectedSourceName: ""
+  property var selectedSourceId: null
+  property bool selectedSourcePresent: false
+  property var micMuted: null
+  property var micVolumePercent: null
+  property string audioError: ""
+
   property string dndState: "unknown"
   property bool dndManaged: false
   property string lastAction: ""
@@ -29,7 +39,7 @@ Item {
 
   function snapshot() {
     return {
-      version: 2,
+      version: 3,
       active: root.active,
       privacy: root.privacy,
       obsInstalled: root.obsInstalled,
@@ -43,6 +53,14 @@ Item {
       replayBuffer: root.replayBuffer,
       currentScene: root.currentScene,
       obsWebSocketError: root.obsWebSocketError,
+      audioReady: root.audioReady,
+      audioSources: root.audioSources,
+      selectedSourceName: root.selectedSourceName,
+      selectedSourceId: root.selectedSourceId,
+      selectedSourcePresent: root.selectedSourcePresent,
+      micMuted: root.micMuted,
+      micVolumePercent: root.micVolumePercent,
+      audioError: root.audioError,
       dndState: root.dndState,
       dndManaged: root.dndManaged,
       lastAction: root.lastAction,
@@ -54,6 +72,7 @@ Item {
     try {
       var state = JSON.parse(String(raw || "{}"))
       var obs = state.obsWebSocket || {}
+      var audio = state.audio || {}
       root.active = !!state.active
       root.privacy = !!state.privacy
       root.obsInstalled = !!state.obsInstalled
@@ -67,6 +86,16 @@ Item {
       root.replayBuffer = obs.replayBuffer === null || obs.replayBuffer === undefined ? null : !!obs.replayBuffer
       root.currentScene = String(obs.currentScene || "")
       root.obsWebSocketError = String(obs.error || "")
+
+      root.audioReady = !!audio.ready
+      root.audioSources = Array.isArray(audio.sources) ? audio.sources : []
+      root.selectedSourceName = String(audio.selectedSourceName || "")
+      root.selectedSourceId = audio.selectedSourceId === undefined ? null : audio.selectedSourceId
+      root.selectedSourcePresent = !!audio.selectedPresent
+      root.micMuted = audio.muted === null || audio.muted === undefined ? null : !!audio.muted
+      root.micVolumePercent = audio.volumePercent === null || audio.volumePercent === undefined ? null : Number(audio.volumePercent)
+      root.audioError = String(audio.error || "")
+
       root.dndState = String(state.dndState || "unknown")
       root.dndManaged = !!state.dndManaged
       root.lastError = ""
@@ -112,8 +141,12 @@ Item {
       case "replay.stop":
       case "clip.save":
       case "scene.set":
+      case "mic.select":
+      case "mic.next":
       case "mic.mute":
       case "mic.unmute":
+      case "mic.toggle":
+      case "mic.volume":
         return root.queueAction(name, arg)
       default:
         return "unknown-action"
