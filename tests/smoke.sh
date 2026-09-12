@@ -6,7 +6,7 @@ cd "$repo_root"
 
 python3 -m json.tool manifest.json >/dev/null
 python3 -m json.tool contracts/actions-v1.json >/dev/null
-python3 -m py_compile bin/obsws.py bin/obsbrowser.py bin/audioctl.py bin/safetyctl.py bin/collabctl.py bin/vdoapi.py bin/onboardingctl.py tests/test_obsws.py tests/test_obsbrowser.py tests/test_audioctl.py tests/test_safetyctl.py tests/test_collabctl.py tests/test_vdoapi.py tests/test_onboardingctl.py
+python3 -m py_compile bin/obsws.py bin/obsbrowser.py bin/audioctl.py bin/safetyctl.py bin/collabctl.py bin/vdoapi.py bin/onboardingctl.py bin/profilectl.py bin/guestlayout.py tests/test_obsws.py tests/test_obsbrowser.py tests/test_audioctl.py tests/test_safetyctl.py tests/test_collabctl.py tests/test_vdoapi.py tests/test_onboardingctl.py tests/test_profilectl.py tests/test_guestlayout.py
 bash -n bin/streamerctl
 
 python3 - <<'PY'
@@ -20,7 +20,7 @@ assert {"service", "bar-widget", "overlay"}.issubset(set(manifest["kinds"]))
 assert manifest["entryPoints"]["service"] == "Service.qml"
 assert manifest["entryPoints"]["barWidget"] == "BarWidget.qml"
 assert manifest["entryPoints"]["overlay"] == "Onboarding.qml"
-assert manifest["version"] == "0.8.0"
+assert manifest["version"] == "0.9.0"
 
 contract = json.loads(Path("contracts/actions-v1.json").read_text())
 actions = {entry["id"]: entry for entry in contract["actions"]}
@@ -36,6 +36,7 @@ required = (
     "collab.copy-slot-invite", "collab.copy-slot-source",
     "collab.obs-add-program", "collab.obs-add-slot",
     "collab.guest-refresh", "collab.guest-mute", "collab.guest-unmute", "collab.guest-disconnect",
+    "collab.layout", "profile.apply", "profile.next", "profile.previous", "profile.layout",
     "onboarding.open", "onboarding.complete", "onboarding.reset",
 )
 for name in required:
@@ -50,10 +51,13 @@ for high_impact in (
     "collab.slot-rotate", "collab.copy-slot-invite", "collab.copy-slot-source",
     "collab.obs-add-program", "collab.obs-add-slot",
     "collab.guest-mute", "collab.guest-unmute", "collab.guest-disconnect",
+    "collab.layout", "profile.layout",
 ):
     assert actions[high_impact]["agentConfirmation"] == "required", high_impact
 
 assert actions["collab.guest-refresh"]["agentConfirmation"] == "none"
+for name in ("profile.apply", "profile.next", "profile.previous"):
+    assert actions[name]["agentConfirmation"] == "session", name
 assert actions["onboarding.open"]["agentConfirmation"] == "none"
 assert actions["onboarding.complete"]["agentConfirmation"] == "none"
 assert actions["onboarding.reset"]["agentConfirmation"] == "session"
@@ -66,8 +70,9 @@ python3 bin/audioctl.py status | python3 -m json.tool >/dev/null
 python3 bin/safetyctl.py status | python3 -m json.tool >/dev/null
 python3 bin/collabctl.py status | python3 -m json.tool >/dev/null
 python3 bin/onboardingctl.py status | python3 -m json.tool >/dev/null
+python3 bin/profilectl.py status | python3 -m json.tool >/dev/null
 
-python3 -m unittest -v tests/test_obsws.py tests/test_obsbrowser.py tests/test_audioctl.py tests/test_safetyctl.py tests/test_collabctl.py tests/test_vdoapi.py tests/test_onboardingctl.py
+python3 -m unittest -v tests/test_obsws.py tests/test_obsbrowser.py tests/test_audioctl.py tests/test_safetyctl.py tests/test_collabctl.py tests/test_vdoapi.py tests/test_onboardingctl.py tests/test_profilectl.py tests/test_guestlayout.py
 
 # Future-integration architecture stays generic in the public project docs.
 if grep -Rin --exclude='*.pyc' --exclude-dir='__pycache__' 'lychnos' README.md docs contracts; then
@@ -81,9 +86,13 @@ if python3 bin/collabctl.py status | grep -E '"(room|password|streamId|controlId
   exit 1
 fi
 
-# The onboarding state model must remain free of streaming/collaboration secrets.
+# The onboarding/profile state models must remain free of streaming/collaboration secrets.
 if python3 bin/onboardingctl.py status | grep -E '"(room|password|streamId|controlId|inviteUrl|programUrl|directorUrl)"'; then
   echo "onboarding status unexpectedly exposes sensitive fields" >&2
+  exit 1
+fi
+if python3 bin/profilectl.py status | grep -E '"(room|password|streamId|controlId|inviteUrl|programUrl|directorUrl)"'; then
+  echo "profile status unexpectedly exposes sensitive fields" >&2
   exit 1
 fi
 
@@ -92,5 +101,6 @@ grep -q 'FIRST-RUN GUIDE' Onboarding.qml
 grep -q 'docs/USER_GUIDE.md' Onboarding.qml
 grep -q 'collab.guest-disconnect' BarWidget.qml
 grep -q 'guestRefreshTimer' Service.qml
+grep -q 'profileGuestLayout' Service.qml
 
 echo "smoke tests passed"
