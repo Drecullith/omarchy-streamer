@@ -2,19 +2,20 @@
 
 ## Goal
 
-Omarchy Streamer is a third-party Omarchy Quattro plugin that coordinates streaming, recording, audio, privacy, collaboration, and onboarding without hidden privileged actions or permanent ownership of user settings.
+Omarchy Streamer is a third-party Omarchy Quattro plugin that coordinates streaming, recording, audio, privacy, collaboration, guest control, and onboarding without hidden privileged actions or permanent ownership of user settings.
 
-The v0.7 architecture has nine main pieces:
+The v0.8 architecture has ten main pieces:
 
-1. `BarWidget.qml` — user-facing status and controls, including replayable Guide access.
+1. `BarWidget.qml` — user-facing status and controls, including managed guest state/control and replayable Guide access.
 2. `Onboarding.qml` — native Quattro overlay for first-run guidance, preflight, and replayable help.
-3. `Service.qml` — long-lived Quickshell service, IPC boundary, and one-time first-run summon.
-4. `bin/streamerctl` — action router, reversible mode/privacy state, composite emergency actions, and onboarding summon path.
+3. `Service.qml` — long-lived Quickshell service, IPC boundary, one-time first-run summon, and bounded guest-presence refresh loop.
+4. `bin/streamerctl` — action router, reversible mode/privacy state, composite emergency actions, onboarding summon path, and collaboration action boundary.
 5. `bin/obsws.py` — authenticated localhost OBS WebSocket v5 adapter.
 6. `bin/obsbrowser.py` — non-destructive OBS Browser Source provisioning.
 7. `bin/audioctl.py` / `bin/safetyctl.py` — WirePlumber audio and Hyprland stream-safety adapters.
-8. `bin/collabctl.py` — browser collaboration rooms, managed guest identities, secret-link handling, and OBS collaboration source orchestration.
-9. `bin/onboardingctl.py` — tiny user-only onboarding completion state.
+8. `bin/collabctl.py` — browser rooms, managed guest identities, safe guest-state cache, secret-link handling, provider-control orchestration, and OBS collaboration source orchestration.
+9. `bin/vdoapi.py` — minimal VDO.Ninja private page-control WebSocket client with correlated callbacks and explicit timeouts.
+10. `bin/onboardingctl.py` — tiny user-only onboarding completion state.
 
 ## Core invariants
 
@@ -29,7 +30,9 @@ The v0.7 architecture has nine main pieces:
 - Window titles are not exposed in status output.
 - Emergency actions continue best-effort when one subsystem is unavailable.
 - Collaboration room passwords, managed stream IDs, page-control IDs, and secret URLs are never included in generic status or IPC snapshots.
-- Secret-bearing collaboration actions are explicit and confirmation-marked.
+- Private page-control IDs are not passed as process command-line arguments.
+- Secret-bearing collaboration actions and remote guest mutations are explicit and confirmation-marked.
+- A provider WebSocket connection alone never counts as guest presence.
 - Managed OBS Browser Sources never overwrite a non-Browser Source with the same reserved name.
 - Onboarding status contains no stream/collaboration credentials.
 - Skipping onboarding suppresses repeat first-run summons rather than nagging every login.
@@ -44,64 +47,9 @@ bar-widget
 overlay
 ```
 
-The service and bar widget stay available as before. `Onboarding.qml` is registered as the plugin overlay and uses Omarchy's normal `shell summon` lifecycle.
+The service is the long-running coordinator. The bar widget reads safe status and invokes explicit actions. `Onboarding.qml` is registered as the plugin overlay and uses Omarchy's normal `shell summon` lifecycle.
 
-On service startup:
-
-1. `streamerctl status` includes safe onboarding state.
-2. If the current tour version is incomplete, `Service.qml` arms a short delayed first-run timer.
-3. The service invokes `onboarding.open first-run` once for that shell session.
-4. `streamerctl` asks `omarchy-shell shell summon io.github.drecullith.streamer` to show the registered overlay.
-5. Skip/Finish calls `onboarding.complete`, which writes the completion marker.
-
-The delay avoids racing plugin registration during shell startup. The service deliberately marks the summon attempted for that shell session rather than repeatedly opening the guide if the user is interacting with the desktop.
-
-## Onboarding state
-
-Onboarding state is stored under the normal Streamer state root:
-
-```text
-$XDG_STATE_HOME/omarchy-streamer/onboarding.json
-```
-
-or `~/.local/state/omarchy-streamer/onboarding.json`.
-
-The file contains only:
-
-```text
-version
-completedAt
-```
-
-It is written with user-only permissions where supported.
-
-The current safe status model exposes:
-
-```text
-ready
-tourVersion
-completed
-completedAt
-error
-```
-
-A future tour version can become eligible automatically by increasing the internal tour version without deleting unrelated Streamer state.
-
-## Guided overlay
-
-`Onboarding.qml` follows the same overlay lifecycle pattern as first-party Quattro overlays: `open(payload)` reveals a layer-shell `PanelWindow`, and `close()` hides it.
-
-Supported modes:
-
-```text
-first-run  start at Welcome and require Skip/Finish to suppress future first-run summon
-tour       replay the guide without changing completion state
-preflight  open directly on the live preflight page
-```
-
-The overlay has seven pages covering the safety model, preflight, OBS, Audio Desk, Stream-Safe/emergency controls, collaboration, and a ready-to-stream checklist.
-
-The preflight page queries the normal `streamerctl status` path. It does not introduce a second privileged configuration path.
+On service startup, onboarding state is checked and the first-run guide is summoned once when eligible. While a collaboration room with managed slots is active, the service also runs the guest refresh action every 15 seconds. The bar/status path itself does not perform provider network I/O; it reads the local guest-state cache.
 
 ## Runtime state
 
@@ -113,9 +61,31 @@ $XDG_STATE_HOME/omarchy-streamer/
 
 or `~/.local/state/omarchy-streamer/`.
 
-Persisted state includes reversible Streamer Mode/privacy state, Audio Desk mic selection, previous Stream-Safe workspace, collaboration session credentials, and onboarding completion.
+Persisted state includes reversible Streamer Mode/privacy state, Audio Desk mic selection, previous Stream-Safe workspace, collaboration session credentials, cached safe guest state, and onboarding completion.
 
-Sensitive state files are written with user-only permissions where supported. OBS output state remains authoritative in OBS and is queried live.
+Sensitive state files are written with user-only permissions where supported. The collaboration session file contains room/slot capabilities. The guest-state cache contains only safe fields and no credentials.
+
+OBS output state remains authoritative in OBS and is queried live.
+
+## Onboarding state and overlay
+
+Onboarding state is stored in:
+
+```text
+$XDG_STATE_HOME/omarchy-streamer/onboarding.json
+```
+
+The file contains only `version` and `completedAt`.
+
+`Onboarding.qml` supports:
+
+```text
+first-run
+ tour
+preflight
+```
+
+The preflight page queries the same normal `streamerctl status` path used elsewhere. It does not create a second privileged configuration path.
 
 ## IPC and action mediation
 
@@ -137,15 +107,21 @@ disable
 toggle
 ```
 
-Onboarding actions:
+The action vocabulary is defined in `contracts/actions-v1.json`. High-impact actions are marked so external callers can require confirmation before invocation.
+
+Remote guest mutations are high-impact actions:
 
 ```text
-onboarding.open <tour|first-run|preflight>
-onboarding.complete
-onboarding.reset
+collab.guest-mute <slot>
+collab.guest-unmute <slot>
+collab.guest-disconnect <slot>
 ```
 
-The action vocabulary is defined in `contracts/actions-v1.json`. High-impact actions remain explicitly marked so external callers can require confirmation before invocation.
+Presence refresh is read-only:
+
+```text
+collab.guest-refresh
+```
 
 ## OBS integration
 
@@ -170,7 +146,7 @@ obs-websocket
     └── add existing managed Browser Source to scene if needed
 ```
 
-The default collaboration scene is `Omarchy Guests`. It can be overridden through `OMARCHY_STREAMER_GUEST_SCENE`.
+The default collaboration scene is `Omarchy Guests`, overridable through `OMARCHY_STREAMER_GUEST_SCENE`.
 
 Reserved source names are `Omarchy Streamer - Guests` and `Omarchy Streamer - Guest N`. If a reserved name already exists as a non-`browser_source`, provisioning fails safely rather than replacing it.
 
@@ -178,15 +154,68 @@ Reserved source names are `Omarchy Streamer - Guests` and `Omarchy Streamer - Gu
 
 A collaboration session has a room ID/password plus four managed guest slots by default.
 
-Each managed slot contains a safe slot number/label plus private `streamId` and `controlId` capability values. v0.5 rooms are migrated in place so existing room/password values remain unchanged while managed slots are added.
+Each managed slot contains:
 
-Generic collaboration status exposes only safe metadata and deliberately excludes room, password, stream IDs, control IDs, and secret URLs.
+```text
+slot number       safe UI identity
+label             local human-facing label
+streamId          private publish/view identity
+controlId         private page-control capability
+```
 
 A managed guest invite can carry its private control capability, while the corresponding solo OBS URL receives only the view identity. This prevents OBS from receiving the guest page's remote-control capability.
 
-## Live guest-control boundary
+v0.5 rooms are migrated in place so existing room/password values remain unchanged while managed slots are added.
 
-Private guest control IDs are provisioned but live presence/mute/remove actions are not yet exposed. Those controls wait for real provider-session testing of network lifecycle, stale-state handling, and authorization behavior.
+## Provider page-control boundary
+
+`vdoapi.py` speaks the provider's documented private page-control WebSocket interface.
+
+For one request it:
+
+1. opens `wss://api.vdo.ninja/` by default,
+2. joins the private `controlId`,
+3. sends one explicit action with a unique callback ID (`cib`),
+4. ignores unrelated messages,
+5. accepts only the callback carrying the matching `cib`,
+6. times out instead of assuming success.
+
+The default callback timeout is 1.4 seconds and can be overridden with `OMARCHY_STREAMER_VDO_API_TIMEOUT`. The endpoint can be overridden with `OMARCHY_STREAMER_VDO_API_URL`; CI uses a local plain-WebSocket fake provider.
+
+Private `controlId` values are loaded by `collabctl.py` from the user-only session file and passed directly to the imported `vdoapi` module in memory. They are not supplied as CLI arguments.
+
+## Guest presence model
+
+Presence is deliberately callback-based.
+
+A slot is **ONLINE** only when its own managed page answers a correlated `getDetails` callback. Merely opening the provider API WebSocket does not prove page presence.
+
+A missing callback within the timeout produces **OFFLINE**. A control-channel connection failure produces an unknown/control-unavailable state rather than an invented offline result.
+
+Safe cached state contains only:
+
+```text
+slot
+online
+micEnabled
+checkedAt
+stale
+error
+```
+
+The cache is stored as `collab-guest-state.json` with user-only permissions where supported. `stale` becomes true after 30 seconds by default.
+
+Four slot probes run concurrently, while cache read-modify-write operations are serialized so one guest update cannot clobber another guest's state.
+
+## Guest remote controls
+
+`collab.guest-mute` and `collab.guest-unmute` send the documented `mic` page action and wait for the correlated callback. The cached `micEnabled` field changes only from a returned boolean callback result.
+
+`collab.guest-disconnect` sends the documented `hangup` page action and marks the slot offline only after the command callback is received.
+
+Timeouts and connection failures surface as errors; they are not converted into success.
+
+These paths are protocol-tested in CI against a local fake WebSocket provider. Real VDO.Ninja browser-session behavior remains a field-validation item and should not be described as hardware/session verified yet.
 
 ## Stream-Safe workspace
 
@@ -198,6 +227,8 @@ Sensitive-window rules are warning-only. Active titles may participate in local 
 
 `audioctl.py` uses WirePlumber `wpctl`. It remembers a microphone by PipeWire node name and resolves the current numeric ID on demand. Missing selected devices are surfaced rather than silently replaced.
 
+Per-guest PipeWire routing is not implemented yet because it requires real browser-source/audio-session observation to map provider streams to local audio nodes safely.
+
 ## Emergency actions
 
 `emergency.end-live` independently attempts Privacy/DND on, selected microphone mute, Stream-Safe workspace entry, and OBS stream stop.
@@ -206,7 +237,7 @@ Sensitive-window rules are warning-only. Active titles may participate in local 
 
 ## Health model
 
-`streamerctl status` returns version 7 state containing safe aggregate state from OBS, Audio Desk, Stream-Safe, Collaboration, and Onboarding.
+`streamerctl status` returns version 8 state containing safe aggregate state from OBS, Audio Desk, Stream-Safe, Collaboration, guest-state cache, and Onboarding.
 
 Unknown/unreachable subsystems are represented explicitly rather than being presented as healthy.
 
@@ -214,7 +245,7 @@ Unknown/unreachable subsystems are represented explicitly rather than being pres
 
 CI validates:
 
-- manifest and action contract, including overlay registration and v0.7 version,
+- manifest and action contract, including v0.8 version,
 - shell/Python syntax,
 - safe status behavior without desktop services,
 - fake local OBS WebSocket RPC,
@@ -225,10 +256,13 @@ CI validates:
 - Stream-Safe workspace enter/restore,
 - collaboration state permissions/migration/slot rotation,
 - collaboration secret non-disclosure,
+- parallel four-slot guest refresh without cache clobbering,
+- callback-backed mic state and disconnect cache transitions,
+- timeout-is-not-online behavior,
+- VDO.Ninja-style WebSocket join/action/callback correlation against a fake provider,
 - onboarding initial/complete/reset/version behavior,
-- onboarding state file permissions,
-- onboarding status secret-field guard,
-- presence of the overlay lifecycle/manual hooks,
+- onboarding state file permissions and secret-field guard,
+- presence of overlay/manual hooks,
 - public documentation remaining integration-neutral.
 
-The remaining validation class is real Omarchy Quattro + OBS + PipeWire + Hyprland + browser collaboration testing, including visual/focus validation of the new overlay.
+The remaining validation class is real Omarchy Quattro + OBS + PipeWire + Hyprland + browser collaboration testing, including visual/focus validation of the overlay and real provider page-control behavior.
