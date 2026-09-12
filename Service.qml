@@ -40,6 +40,16 @@ Item {
   property string activeWindowClass: ""
   property string safetyError: ""
 
+  property bool collaborationReady: false
+  property bool collaborationActive: false
+  property string collaborationProvider: ""
+  property string collaborationProviderLabel: ""
+  property bool collaborationClipboardReady: false
+  property bool collaborationBrowserReady: false
+  property bool collaborationInviteReady: false
+  property bool collaborationProgramUrlReady: false
+  property string collaborationError: ""
+
   property string dndState: "unknown"
   property bool dndManaged: false
   property string lastAction: ""
@@ -47,7 +57,7 @@ Item {
 
   function snapshot() {
     return {
-      version: 4,
+      version: 5,
       active: root.active,
       privacy: root.privacy,
       obsInstalled: root.obsInstalled,
@@ -76,6 +86,15 @@ Item {
       sensitiveRule: root.sensitiveRule,
       activeWindowClass: root.activeWindowClass,
       safetyError: root.safetyError,
+      collaborationReady: root.collaborationReady,
+      collaborationActive: root.collaborationActive,
+      collaborationProvider: root.collaborationProvider,
+      collaborationProviderLabel: root.collaborationProviderLabel,
+      collaborationClipboardReady: root.collaborationClipboardReady,
+      collaborationBrowserReady: root.collaborationBrowserReady,
+      collaborationInviteReady: root.collaborationInviteReady,
+      collaborationProgramUrlReady: root.collaborationProgramUrlReady,
+      collaborationError: root.collaborationError,
       dndState: root.dndState,
       dndManaged: root.dndManaged,
       lastAction: root.lastAction,
@@ -89,6 +108,7 @@ Item {
       var obs = state.obsWebSocket || {}
       var audio = state.audio || {}
       var safety = state.safety || {}
+      var collab = state.collaboration || {}
 
       root.active = !!state.active
       root.privacy = !!state.privacy
@@ -121,6 +141,16 @@ Item {
       root.sensitiveRule = String(safety.sensitiveRule || "")
       root.activeWindowClass = String(safety.activeWindowClass || "")
       root.safetyError = String(safety.error || "")
+
+      root.collaborationReady = !!collab.ready
+      root.collaborationActive = !!collab.active
+      root.collaborationProvider = String(collab.provider || "")
+      root.collaborationProviderLabel = String(collab.providerLabel || "")
+      root.collaborationClipboardReady = !!collab.clipboardReady
+      root.collaborationBrowserReady = !!collab.browserReady
+      root.collaborationInviteReady = !!collab.inviteReady
+      root.collaborationProgramUrlReady = !!collab.programUrlReady
+      root.collaborationError = String(collab.error || "")
 
       root.dndState = String(state.dndState || "unknown")
       root.dndManaged = !!state.dndManaged
@@ -178,6 +208,12 @@ Item {
       case "safety.refresh":
       case "emergency.end-live":
       case "emergency.stop-all":
+      case "collab.create":
+      case "collab.rotate":
+      case "collab.reset":
+      case "collab.open-director":
+      case "collab.copy-invite":
+      case "collab.copy-program":
         return root.queueAction(name, arg)
       default:
         return "unknown-action"
