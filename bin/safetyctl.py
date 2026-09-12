@@ -8,6 +8,7 @@ It never closes, moves, hides, or kills user applications.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -22,11 +23,23 @@ CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / 
 PREVIOUS_WORKSPACE = STATE_DIR / "previous-workspace"
 DEFAULT_RULES = Path(__file__).resolve().parent.parent / "config" / "sensitive-apps.txt"
 USER_RULES = CONFIG_DIR / "sensitive-apps.txt"
-SAFE_WORKSPACE = os.environ.get("OMARCHY_STREAMER_SAFE_WORKSPACE", "stream-safe")
 
 
 class SafetyError(RuntimeError):
     pass
+
+
+def settings_values() -> dict[str, Any]:
+    path = Path(__file__).with_name("settings.py")
+    spec = importlib.util.spec_from_file_location("omarchy_streamer_settings", path)
+    if not spec or not spec.loader:
+        raise SafetyError("could not load Streamer settings")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    try:
+        return dict(module.resolved()["values"])
+    except Exception as exc:
+        raise SafetyError(f"invalid Streamer settings: {exc}") from exc
 
 
 def run_hyprctl(*args: str) -> str:
@@ -55,7 +68,7 @@ def hypr_json(command: str) -> dict[str, Any]:
 
 
 def safe_workspace_name() -> str:
-    name = SAFE_WORKSPACE.strip()
+    name = str(settings_values().get("safeWorkspace", "stream-safe")).strip()
     if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", name):
         raise SafetyError("invalid stream-safe workspace name")
     return name
@@ -64,7 +77,7 @@ def safe_workspace_name() -> str:
 def load_rules() -> list[tuple[str, str]]:
     rules: list[tuple[str, str]] = []
     paths = []
-    if os.environ.get("OMARCHY_STREAMER_SENSITIVE_DEFAULTS", "1") != "0":
+    if bool(settings_values().get("sensitiveDefaults", True)):
         paths.append(DEFAULT_RULES)
     paths.append(USER_RULES)
 
