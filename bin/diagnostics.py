@@ -21,6 +21,9 @@ def _bool(value: Any) -> bool:
 
 
 def build_snapshot(status: dict[str, Any], settings: dict[str, Any] | None = None) -> dict[str, Any]:
+    if not settings and isinstance(status.get("settings"), dict):
+        settings = status["settings"]
+    settings = settings or {}
     obs = status.get("obsWebSocket") if isinstance(status.get("obsWebSocket"), dict) else {}
     audio = status.get("audio") if isinstance(status.get("audio"), dict) else {}
     safety = status.get("safety") if isinstance(status.get("safety"), dict) else {}
@@ -41,8 +44,8 @@ def build_snapshot(status: dict[str, Any], settings: dict[str, Any] | None = Non
     except (OSError, json.JSONDecodeError):
         pass
 
-    values = settings.get("values", {}) if isinstance(settings, dict) and isinstance(settings.get("values"), dict) else {}
-    sources = settings.get("sources", {}) if isinstance(settings, dict) and isinstance(settings.get("sources"), dict) else {}
+    values = settings.get("values", {}) if isinstance(settings.get("values"), dict) else {}
+    sources = settings.get("sources", {}) if isinstance(settings.get("sources"), dict) else {}
 
     return {
         "schemaVersion": 1,
@@ -67,7 +70,7 @@ def build_snapshot(status: dict[str, Any], settings: dict[str, Any] | None = Non
         "profile": {"active": str(profiles.get("active", "")), "guestRefreshSeconds": int(profiles.get("guestRefreshSeconds", 0) or 0)},
         "onboarding": {"ready": _bool(onboarding.get("ready")), "complete": _bool(onboarding.get("completed"))},
         "settings": {
-            "ready": bool(settings.get("ready", False)) if isinstance(settings, dict) else False,
+            "ready": bool(settings.get("ready", False)),
             "guestStateMaxAge": int(values.get("guestStateMaxAge", 0) or 0),
             "guestControlTimeout": float(values.get("guestControlTimeout", 0) or 0),
             "sources": {key: str(value) for key, value in sources.items()},
@@ -84,8 +87,8 @@ def main() -> int:
         status = json.load(sys.stdin)
         if not isinstance(status, dict):
             raise ValueError("status must be a JSON object")
-        settings = json.loads(args.settings) if args.settings else {}
-        if settings and not isinstance(settings, dict):
+        settings = json.loads(args.settings) if args.settings else None
+        if settings is not None and not isinstance(settings, dict):
             raise ValueError("settings must be a JSON object")
         print(json.dumps(build_snapshot(status, settings), separators=(",", ":"), sort_keys=True))
         return 0
