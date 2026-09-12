@@ -6,7 +6,7 @@ cd "$repo_root"
 
 python3 -m json.tool manifest.json >/dev/null
 python3 -m json.tool contracts/actions-v1.json >/dev/null
-python3 -m py_compile bin/obsws.py tests/test_obsws.py
+python3 -m py_compile bin/obsws.py bin/audioctl.py tests/test_obsws.py tests/test_audioctl.py
 bash -n bin/streamerctl
 
 python3 - <<'PY'
@@ -36,6 +36,12 @@ for required in (
     "replay.stop",
     "clip.save",
     "scene.set",
+    "mic.select",
+    "mic.next",
+    "mic.mute",
+    "mic.unmute",
+    "mic.toggle",
+    "mic.volume",
 ):
     assert required in actions, required
 
@@ -48,6 +54,12 @@ for implemented in (
     "replay.stop",
     "clip.save",
     "scene.set",
+    "mic.select",
+    "mic.next",
+    "mic.mute",
+    "mic.unmute",
+    "mic.toggle",
+    "mic.volume",
 ):
     assert actions[implemented]["implemented"] is True, implemented
 
@@ -64,13 +76,14 @@ for high_impact in (
     assert actions[high_impact]["agentConfirmation"] == "required", high_impact
 PY
 
-# The controller and OBS adapter must be safe to query on a generic CI machine
-# where OBS, PipeWire, and omarchy-shell probably do not exist.
+# Controllers must be safe to query on a generic CI machine where OBS,
+# PipeWire, wpctl, and omarchy-shell probably do not exist.
 bash bin/streamerctl status | python3 -m json.tool >/dev/null
 python3 bin/obsws.py status | python3 -m json.tool >/dev/null
+python3 bin/audioctl.py status | python3 -m json.tool >/dev/null
 
-# Exercise a fake local OBS server, including a coalesced HTTP-upgrade + Hello.
-python3 -m unittest -v tests/test_obsws.py
+# Protocol/controller tests use only local fake services/tools.
+python3 -m unittest -v tests/test_obsws.py tests/test_audioctl.py
 
 # Future-integration architecture stays generic in the public project docs.
 if grep -Rin --exclude='*.pyc' --exclude-dir='__pycache__' 'lychnos' README.md docs contracts; then
