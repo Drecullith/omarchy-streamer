@@ -18,108 +18,57 @@ json_bool() { [[ "$1" == "true" ]] && printf 'true' || printf 'false'; }
 file_bool() { [[ -e "$1" ]] && printf 'true' || printf 'false'; }
 
 notifications_dnd_state() {
-  if ! have omarchy-shell; then
-    printf 'unknown'
-    return 0
-  fi
+  if ! have omarchy-shell; then printf 'unknown'; return 0; fi
   local state
   state="$(omarchy-shell notifications dndState 2>/dev/null || true)"
-  case "$state" in
-    on|off) printf '%s' "$state" ;;
-    *) printf 'unknown' ;;
-  esac
+  case "$state" in on|off) printf '%s' "$state" ;; *) printf 'unknown' ;; esac
 }
 
 privacy_enable() {
-  if [[ -e "$PRIVACY_FILE" ]]; then
-    return 0
-  fi
-
+  if [[ -e "$PRIVACY_FILE" ]]; then return 0; fi
   local previous
   previous="$(notifications_dnd_state)"
-  if [[ "$previous" == "unknown" ]]; then
-    rm -f "$PREV_DND_FILE"
-    return 1
-  fi
-
+  if [[ "$previous" == "unknown" ]]; then rm -f "$PREV_DND_FILE"; return 1; fi
   printf '%s\n' "$previous" > "$PREV_DND_FILE"
-  if ! omarchy-shell notifications setDnd on >/dev/null 2>&1; then
-    rm -f "$PREV_DND_FILE"
-    return 1
-  fi
-
+  if ! omarchy-shell notifications setDnd on >/dev/null 2>&1; then rm -f "$PREV_DND_FILE"; return 1; fi
   : > "$PRIVACY_FILE"
 }
 
 privacy_disable() {
-  if [[ ! -e "$PRIVACY_FILE" ]]; then
-    return 0
-  fi
-
+  if [[ ! -e "$PRIVACY_FILE" ]]; then return 0; fi
   local previous="unknown"
   [[ -r "$PREV_DND_FILE" ]] && previous="$(head -n 1 "$PREV_DND_FILE" 2>/dev/null || true)"
-
-  if have omarchy-shell; then
-    case "$previous" in
-      on|off) omarchy-shell notifications setDnd "$previous" >/dev/null 2>&1 || true ;;
-    esac
-  fi
-
+  if have omarchy-shell; then case "$previous" in on|off) omarchy-shell notifications setDnd "$previous" >/dev/null 2>&1 || true ;; esac; fi
   rm -f "$PRIVACY_FILE" "$PREV_DND_FILE"
 }
 
-mode_enable() {
-  : > "$ACTIVE_FILE"
-  privacy_enable || true
-}
-
-mode_disable() {
-  privacy_disable
-  rm -f "$ACTIVE_FILE"
-}
-
-mode_toggle() {
-  if [[ -e "$ACTIVE_FILE" ]]; then mode_disable; else mode_enable; fi
-}
+mode_enable() { : > "$ACTIVE_FILE"; privacy_enable || true; }
+mode_disable() { privacy_disable; rm -f "$ACTIVE_FILE"; }
+mode_toggle() { if [[ -e "$ACTIVE_FILE" ]]; then mode_disable; else mode_enable; fi; }
 
 obs_launch() {
-  if ! have obs; then
-    printf 'error: OBS Studio is not installed or not on PATH\n' >&2
-    exit 4
-  fi
+  if ! have obs; then printf 'error: OBS Studio is not installed or not on PATH\n' >&2; exit 4; fi
   if pgrep -x obs >/dev/null 2>&1; then return 0; fi
   nohup obs >/dev/null 2>&1 &
 }
 
 obs_status_json() {
-  if ! pgrep -x obs >/dev/null 2>&1; then
-    printf '%s' '{"connected":false,"streaming":null,"recording":null,"replayBuffer":null,"currentScene":"","error":"OBS is not running"}'
-    return 0
-  fi
-  if ! have python3; then
-    printf '%s' '{"connected":false,"streaming":null,"recording":null,"replayBuffer":null,"currentScene":"","error":"python3 is required for OBS control"}'
-    return 0
-  fi
+  if ! pgrep -x obs >/dev/null 2>&1; then printf '%s' '{"connected":false,"streaming":null,"recording":null,"replayBuffer":null,"currentScene":"","error":"OBS is not running"}'; return 0; fi
+  if ! have python3; then printf '%s' '{"connected":false,"streaming":null,"recording":null,"replayBuffer":null,"currentScene":"","error":"python3 is required for OBS control"}'; return 0; fi
   local raw
   raw="$(python3 "$OBSWS" status 2>/dev/null || true)"
   if [[ "$raw" == \{*\} ]]; then printf '%s' "$raw"; else printf '%s' '{"connected":false,"streaming":null,"recording":null,"replayBuffer":null,"currentScene":"","error":"OBS WebSocket status failed"}'; fi
 }
 
 audio_status_json() {
-  if ! have python3; then
-    printf '%s' '{"ready":false,"sources":[],"selectedSourceName":"","selectedSourceId":null,"selectedPresent":false,"muted":null,"volumePercent":null,"error":"python3 is required for Audio Desk"}'
-    return 0
-  fi
+  if ! have python3; then printf '%s' '{"ready":false,"sources":[],"selectedSourceName":"","selectedSourceId":null,"selectedPresent":false,"muted":null,"volumePercent":null,"error":"python3 is required for Audio Desk"}'; return 0; fi
   local raw
   raw="$(python3 "$AUDIOCTL" status 2>/dev/null || true)"
   if [[ "$raw" == \{*\} ]]; then printf '%s' "$raw"; else printf '%s' '{"ready":false,"sources":[],"selectedSourceName":"","selectedSourceId":null,"selectedPresent":false,"muted":null,"volumePercent":null,"error":"Audio Desk status failed"}'; fi
 }
 
 safety_status_json() {
-  if ! have python3; then
-    printf '%s' '{"ready":false,"workspaceName":"","streamSafeActive":false,"sensitiveActive":false,"sensitiveRule":"","activeWindowClass":"","error":"python3 is required for Stream-Safe controls"}'
-    return 0
-  fi
+  if ! have python3; then printf '%s' '{"ready":false,"workspaceName":"","streamSafeActive":false,"sensitiveActive":false,"sensitiveRule":"","activeWindowClass":"","error":"python3 is required for Stream-Safe controls"}'; return 0; fi
   local raw
   raw="$(python3 "$SAFETYCTL" status 2>/dev/null || true)"
   if [[ "$raw" == \{*\} ]]; then printf '%s' "$raw"; else printf '%s' '{"ready":false,"workspaceName":"","streamSafeActive":false,"sensitiveActive":false,"sensitiveRule":"","activeWindowClass":"","error":"Stream-Safe status failed"}'; fi
@@ -127,43 +76,20 @@ safety_status_json() {
 
 collab_status_json() {
   if ! have python3; then
-    printf '%s' '{"ready":false,"active":false,"provider":"","providerLabel":"","clipboardReady":false,"browserReady":false,"inviteReady":false,"programUrlReady":false,"credentialsExposed":false,"error":"python3 is required for Collaboration"}'
+    printf '%s' '{"ready":false,"active":false,"provider":"","providerLabel":"","clipboardReady":false,"browserReady":false,"inviteReady":false,"programUrlReady":false,"managedSlotsReady":false,"slotCount":0,"obsSceneName":"","credentialsExposed":false,"error":"python3 is required for Collaboration"}'
     return 0
   fi
   local raw
   raw="$(python3 "$COLLABCTL" status 2>/dev/null || true)"
-  if [[ "$raw" == \{*\} ]]; then printf '%s' "$raw"; else printf '%s' '{"ready":false,"active":false,"provider":"","providerLabel":"","clipboardReady":false,"browserReady":false,"inviteReady":false,"programUrlReady":false,"credentialsExposed":false,"error":"Collaboration status failed"}'; fi
+  if [[ "$raw" == \{*\} ]]; then printf '%s' "$raw"; else printf '%s' '{"ready":false,"active":false,"provider":"","providerLabel":"","clipboardReady":false,"browserReady":false,"inviteReady":false,"programUrlReady":false,"managedSlotsReady":false,"slotCount":0,"obsSceneName":"","credentialsExposed":false,"error":"Collaboration status failed"}'; fi
 }
 
-run_obs_action() {
-  local action="$1" arg="${2:-}"
-  if ! pgrep -x obs >/dev/null 2>&1; then printf 'error: OBS is not running\n' >&2; exit 6; fi
-  if ! have python3; then printf 'error: python3 is required for OBS WebSocket control\n' >&2; exit 6; fi
-  python3 "$OBSWS" action "$action" "$arg"
-}
+run_obs_action() { local action="$1" arg="${2:-}"; if ! pgrep -x obs >/dev/null 2>&1; then printf 'error: OBS is not running\n' >&2; exit 6; fi; if ! have python3; then printf 'error: python3 is required for OBS WebSocket control\n' >&2; exit 6; fi; python3 "$OBSWS" action "$action" "$arg"; }
+run_audio_action() { local action="$1" arg="${2:-}"; if ! have python3; then printf 'error: python3 is required for Audio Desk\n' >&2; exit 7; fi; python3 "$AUDIOCTL" action "$action" "$arg"; }
+run_safety_action() { local action="$1"; if ! have python3; then printf 'error: python3 is required for Stream-Safe controls\n' >&2; exit 9; fi; python3 "$SAFETYCTL" action "$action"; }
+run_collab_action() { local action="$1" arg="${2:-}"; if ! have python3; then printf 'error: python3 is required for Collaboration\n' >&2; exit 10; fi; python3 "$COLLABCTL" action "$action" "$arg"; }
 
-run_audio_action() {
-  local action="$1" arg="${2:-}"
-  if ! have python3; then printf 'error: python3 is required for Audio Desk\n' >&2; exit 7; fi
-  python3 "$AUDIOCTL" action "$action" "$arg"
-}
-
-run_safety_action() {
-  local action="$1"
-  if ! have python3; then printf 'error: python3 is required for Stream-Safe controls\n' >&2; exit 9; fi
-  python3 "$SAFETYCTL" action "$action"
-}
-
-run_collab_action() {
-  local action="$1"
-  if ! have python3; then printf 'error: python3 is required for Collaboration\n' >&2; exit 10; fi
-  python3 "$COLLABCTL" action "$action"
-}
-
-best_effort_obs() {
-  local action="$1"
-  if pgrep -x obs >/dev/null 2>&1 && have python3; then python3 "$OBSWS" action "$action" "" >/dev/null 2>&1 || true; fi
-}
+best_effort_obs() { local action="$1"; if pgrep -x obs >/dev/null 2>&1 && have python3; then python3 "$OBSWS" action "$action" "" >/dev/null 2>&1 || true; fi; }
 
 emergency_action() {
   local action="$1" privacy_ok=false mic_ok=false workspace_ok=false
@@ -171,18 +97,13 @@ emergency_action() {
   if have python3 && python3 "$AUDIOCTL" action mic.mute "" >/dev/null 2>&1; then mic_ok=true; fi
   if have python3 && python3 "$SAFETYCTL" action workspace.enter >/dev/null 2>&1; then workspace_ok=true; fi
   best_effort_obs stream.stop
-  if [[ "$action" == "emergency.stop-all" ]]; then
-    best_effort_obs record.stop
-    best_effort_obs replay.stop
-  fi
-  printf '{"ok":true,"action":"%s","privacy":%s,"micMuted":%s,"streamSafeWorkspace":%s}\n' \
-    "$action" "$(json_bool "$privacy_ok")" "$(json_bool "$mic_ok")" "$(json_bool "$workspace_ok")"
+  if [[ "$action" == "emergency.stop-all" ]]; then best_effort_obs record.stop; best_effort_obs replay.stop; fi
+  printf '{"ok":true,"action":"%s","privacy":%s,"micMuted":%s,"streamSafeWorkspace":%s}\n' "$action" "$(json_bool "$privacy_ok")" "$(json_bool "$mic_ok")" "$(json_bool "$workspace_ok")"
 }
 
 status_json() {
   local active privacy obs_installed obs_running pipewire_ready wpctl_installed python_ready dnd_state dnd_managed obs_ws audio safety collab
-  active="$(file_bool "$ACTIVE_FILE")"
-  privacy="$(file_bool "$PRIVACY_FILE")"
+  active="$(file_bool "$ACTIVE_FILE")"; privacy="$(file_bool "$PRIVACY_FILE")"
   have obs && obs_installed=true || obs_installed=false
   pgrep -x obs >/dev/null 2>&1 && obs_running=true || obs_running=false
   pgrep -x pipewire >/dev/null 2>&1 && pipewire_ready=true || pipewire_ready=false
@@ -190,14 +111,9 @@ status_json() {
   have python3 && python_ready=true || python_ready=false
   dnd_state="$(notifications_dnd_state)"
   if [[ -r "$PREV_DND_FILE" ]] && [[ "$(head -n 1 "$PREV_DND_FILE" 2>/dev/null || true)" != "unknown" ]]; then dnd_managed=true; else dnd_managed=false; fi
-  obs_ws="$(obs_status_json)"
-  audio="$(audio_status_json)"
-  safety="$(safety_status_json)"
-  collab="$(collab_status_json)"
-  printf '{"version":5,"active":%s,"privacy":%s,"obsInstalled":%s,"obsRunning":%s,"pipewireReady":%s,"wpctlInstalled":%s,"pythonReady":%s,"dndState":"%s","dndManaged":%s,"obsWebSocket":%s,"audio":%s,"safety":%s,"collaboration":%s}\n' \
-    "$(json_bool "$active")" "$(json_bool "$privacy")" "$(json_bool "$obs_installed")" "$(json_bool "$obs_running")" \
-    "$(json_bool "$pipewire_ready")" "$(json_bool "$wpctl_installed")" "$(json_bool "$python_ready")" "$dnd_state" \
-    "$(json_bool "$dnd_managed")" "$obs_ws" "$audio" "$safety" "$collab"
+  obs_ws="$(obs_status_json)"; audio="$(audio_status_json)"; safety="$(safety_status_json)"; collab="$(collab_status_json)"
+  printf '{"version":6,"active":%s,"privacy":%s,"obsInstalled":%s,"obsRunning":%s,"pipewireReady":%s,"wpctlInstalled":%s,"pythonReady":%s,"dndState":"%s","dndManaged":%s,"obsWebSocket":%s,"audio":%s,"safety":%s,"collaboration":%s}\n' \
+    "$(json_bool "$active")" "$(json_bool "$privacy")" "$(json_bool "$obs_installed")" "$(json_bool "$obs_running")" "$(json_bool "$pipewire_ready")" "$(json_bool "$wpctl_installed")" "$(json_bool "$python_ready")" "$dnd_state" "$(json_bool "$dnd_managed")" "$obs_ws" "$audio" "$safety" "$collab"
 }
 
 run_action() {
@@ -214,7 +130,7 @@ run_action() {
     mic.select|mic.next|mic.mute|mic.unmute|mic.toggle|mic.volume) run_audio_action "$action" "$arg" ;;
     workspace.enter|workspace.exit|safety.refresh|window.check) run_safety_action "$action" ;;
     emergency.end-live|emergency.stop-all) emergency_action "$action" ;;
-    collab.create|collab.rotate|collab.reset|collab.open-director|collab.copy-invite|collab.copy-program) run_collab_action "$action" ;;
+    collab.create|collab.rotate|collab.reset|collab.open-director|collab.copy-invite|collab.copy-program|collab.slot-rotate|collab.copy-slot-invite|collab.copy-slot-source|collab.obs-add-program|collab.obs-add-slot) run_collab_action "$action" "$arg" ;;
     *) printf 'error: unknown action: %s\n' "$action" >&2; exit 2 ;;
   esac
 }
