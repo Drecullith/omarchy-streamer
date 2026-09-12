@@ -1,0 +1,18 @@
+# Omarchy Streamer sensitive-window warning rules.
+# Format: class:<substring>, title:<substring>, or any:<substring>.
+# Matching is case-insensitive and warning-only: the plugin never closes or hides apps.
+#
+# Add personal rules in:
+#   ~/.config/omarchy-streamer/sensitive-apps.txt
+
+class:1password
+class:bitwarden
+class:keepassxc
+class:proton-pass
+class:proton pass
+class:seahorse
+class:kwalletmanager
+class:authenticator
+title:password manager
+title:one-time password
+title:two-factor authentication
