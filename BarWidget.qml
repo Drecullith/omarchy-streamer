@@ -31,15 +31,24 @@ BarWidget {
   property var micVolumePercent: null
   property string audioError: ""
 
+  property bool safetyReady: false
+  property string workspaceName: ""
+  property bool streamSafeActive: false
+  property bool sensitiveActive: false
+  property string sensitiveRule: ""
+  property string activeWindowClass: ""
+  property string safetyError: ""
+
   property string dndState: "unknown"
-  property string statusBuffer: ""
   property string actionMessage: ""
 
   readonly property bool live: root.streaming === true
   readonly property bool rec: root.recording === true
+  readonly property bool replaying: root.replayBuffer === true
   readonly property bool captureActive: root.live || root.rec
   readonly property bool privacyWarning: root.captureActive && !root.privacy
   readonly property bool micWarning: root.selectedSourceName !== "" && !root.selectedSourcePresent
+  readonly property bool safetyWarning: root.captureActive && root.sensitiveActive
   readonly property string barLabel: root.live ? "LIVE" : (root.rec ? "REC" : (root.active ? "STREAM" : "Stream"))
 
   implicitWidth: statusRow.implicitWidth + Style.space(14)
@@ -50,6 +59,8 @@ BarWidget {
       var state = JSON.parse(String(raw || "{}"))
       var obs = state.obsWebSocket || {}
       var audio = state.audio || {}
+      var safety = state.safety || {}
+
       root.active = !!state.active
       root.privacy = !!state.privacy
       root.obsInstalled = !!state.obsInstalled
@@ -70,6 +81,14 @@ BarWidget {
       root.micVolumePercent = audio.volumePercent === null || audio.volumePercent === undefined ? null : Number(audio.volumePercent)
       root.audioError = String(audio.error || "")
 
+      root.safetyReady = !!safety.ready
+      root.workspaceName = String(safety.workspaceName || "")
+      root.streamSafeActive = !!safety.streamSafeActive
+      root.sensitiveActive = !!safety.sensitiveActive
+      root.sensitiveRule = String(safety.sensitiveRule || "")
+      root.activeWindowClass = String(safety.activeWindowClass || "")
+      root.safetyError = String(safety.error || "")
+
       root.dndState = String(state.dndState || "unknown")
       if (!sceneField.activeFocus && root.currentScene !== "") sceneField.text = root.currentScene
     } catch (e) {}
@@ -77,8 +96,20 @@ BarWidget {
 
   function refreshStatus() {
     if (statusProc.running) return
-    root.statusBuffer = ""
     statusProc.running = true
+  }
+
+  function feedback(raw) {
+    var text = String(raw || "").trim()
+    if (text === "") return
+    try {
+      var data = JSON.parse(text)
+      if (String(data.action || "").indexOf("emergency.") === 0) {
+        root.actionMessage = "Emergency safety action applied"
+        return
+      }
+    } catch (e) {}
+    root.actionMessage = text
   }
 
   function runAction(name, arg) {
@@ -113,11 +144,11 @@ BarWidget {
     running: false
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: if (text.trim() !== "") root.actionMessage = text.trim()
+      onStreamFinished: root.feedback(text)
     }
     stderr: StdioCollector {
       waitForEnd: true
-      onStreamFinished: if (text.trim() !== "") root.actionMessage = text.trim()
+      onStreamFinished: root.feedback(text)
     }
     onExited: function(exitCode) {
       if (exitCode === 0 && (root.actionMessage === "" || root.actionMessage === "Working…")) root.actionMessage = "Done"
@@ -154,7 +185,9 @@ BarWidget {
 
     Text {
       text: root.captureActive ? "●" : (root.active ? "●" : "○")
-      color: root.captureActive || root.privacyWarning || root.micWarning ? Color.urgent : (root.active ? Color.accent : root.bar.barForeground)
+      color: root.captureActive || root.privacyWarning || root.micWarning || root.safetyWarning
+             ? Color.urgent
+             : (root.active ? Color.accent : root.bar.barForeground)
       font.family: root.bar.fontFamily
       font.pixelSize: Style.font.body
       anchors.verticalCenter: parent.verticalCenter
@@ -182,7 +215,7 @@ BarWidget {
       else root.popupOpen = !root.popupOpen
     }
 
-    onEntered: if (root.bar) root.bar.showTooltip(root, root.live ? "LIVE — click for stream controls" : (root.rec ? "Recording — click for controls" : "Streamer Mode"))
+    onEntered: if (root.bar) root.bar.showTooltip(root, root.live ? "LIVE — click for stream controls" : (root.rec ? "Recording — click for controls" : (root.sensitiveActive ? "Streamer Mode — sensitive window warning" : "Streamer Mode")))
     onExited: if (root.bar) root.bar.hideTooltip(root)
   }
 
@@ -192,7 +225,7 @@ BarWidget {
     bar: root.bar
     owner: root
     open: root.popupOpen
-    contentWidth: popup.fittedContentWidth(Style.space(410))
+    contentWidth: popup.fittedContentWidth(Style.space(420))
     contentHeight: popup.fittedContentHeight(content.implicitHeight)
 
     Column {
@@ -232,131 +265,99 @@ BarWidget {
         wrapMode: Text.Wrap
       }
 
-      Rectangle {
+      Text {
+        visible: root.safetyWarning
         width: parent.width
-        height: Style.space(38)
-        radius: Style.cornerRadius
-        color: modeMouse.containsMouse ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.18) : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.07)
-        Text {
-          anchors.centerIn: parent
-          text: root.active ? "Disable Streamer Mode" : "Enable Streamer Mode"
-          color: Color.foreground
-          font.family: root.bar.fontFamily
-          font.pixelSize: Style.font.body
+        text: "⚠ Sensitive window is active while capture is running" + (root.activeWindowClass ? " · " + root.activeWindowClass : "")
+        color: Color.urgent
+        font.family: root.bar.fontFamily
+        font.pixelSize: Style.font.body
+        font.bold: true
+        wrapMode: Text.Wrap
+      }
+
+      StreamerButton {
+        width: parent.width
+        fontFamily: root.bar.fontFamily
+        label: root.active ? "Disable Streamer Mode" : "Enable Streamer Mode"
+        onClicked: root.runAction("mode.toggle")
+      }
+
+      Text {
+        width: parent.width
+        text: "Emergency"
+        color: Color.foreground
+        font.family: root.bar.fontFamily
+        font.pixelSize: Style.font.subtitle
+        font.bold: true
+      }
+
+      Row {
+        width: parent.width
+        spacing: Style.space(8)
+        StreamerButton {
+          width: (parent.width - parent.spacing) / 2
+          fontFamily: root.bar.fontFamily
+          label: "End Live + Mute"
+          danger: true
+          emphasis: root.live
+          onClicked: root.runAction("emergency.end-live")
         }
-        MouseArea {
-          id: modeMouse
-          anchors.fill: parent
-          hoverEnabled: true
-          cursorShape: Qt.PointingHandCursor
-          onClicked: root.runAction("mode.toggle")
+        StreamerButton {
+          width: (parent.width - parent.spacing) / 2
+          fontFamily: root.bar.fontFamily
+          label: "Stop All Capture"
+          danger: true
+          emphasis: root.captureActive || root.replaying
+          onClicked: root.runAction("emergency.stop-all")
         }
       }
 
       Row {
         width: parent.width
         spacing: Style.space(8)
-
-        Rectangle {
+        StreamerButton {
           width: (parent.width - parent.spacing) / 2
-          height: Style.space(38)
-          radius: Style.cornerRadius
-          color: streamMouse.containsMouse ? Qt.rgba(Color.urgent.r, Color.urgent.g, Color.urgent.b, 0.2) : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.07)
-          Text {
-            anchors.centerIn: parent
-            text: root.live ? "Stop Stream" : "Start Stream"
-            color: root.live ? Color.urgent : (root.obsWebSocketReady ? Color.foreground : Qt.darker(Color.foreground, 1.5))
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.body
-            font.bold: root.live
-          }
-          MouseArea {
-            id: streamMouse
-            anchors.fill: parent
-            enabled: root.obsWebSocketReady
-            hoverEnabled: true
-            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-            onClicked: root.runAction(root.live ? "stream.stop" : "stream.start")
-          }
+          fontFamily: root.bar.fontFamily
+          label: root.live ? "Stop Stream" : "Start Stream"
+          available: root.obsWebSocketReady
+          danger: root.live
+          emphasis: root.live
+          onClicked: root.runAction(root.live ? "stream.stop" : "stream.start")
         }
-
-        Rectangle {
+        StreamerButton {
           width: (parent.width - parent.spacing) / 2
-          height: Style.space(38)
-          radius: Style.cornerRadius
-          color: recordMouse.containsMouse ? Qt.rgba(Color.urgent.r, Color.urgent.g, Color.urgent.b, 0.2) : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.07)
-          Text {
-            anchors.centerIn: parent
-            text: root.rec ? "Stop Recording" : "Start Recording"
-            color: root.rec ? Color.urgent : (root.obsWebSocketReady ? Color.foreground : Qt.darker(Color.foreground, 1.5))
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.body
-            font.bold: root.rec
-          }
-          MouseArea {
-            id: recordMouse
-            anchors.fill: parent
-            enabled: root.obsWebSocketReady
-            hoverEnabled: true
-            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-            onClicked: root.runAction(root.rec ? "record.stop" : "record.start")
-          }
+          fontFamily: root.bar.fontFamily
+          label: root.rec ? "Stop Recording" : "Start Recording"
+          available: root.obsWebSocketReady
+          danger: root.rec
+          emphasis: root.rec
+          onClicked: root.runAction(root.rec ? "record.stop" : "record.start")
         }
       }
 
       Row {
         width: parent.width
         spacing: Style.space(8)
-
-        Rectangle {
+        StreamerButton {
           width: (parent.width - parent.spacing) / 2
-          height: Style.space(36)
-          radius: Style.cornerRadius
-          color: replayMouse.containsMouse ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.18) : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.07)
-          Text {
-            anchors.centerIn: parent
-            text: root.replayBuffer === true ? "Stop Replay Buffer" : "Start Replay Buffer"
-            color: root.obsWebSocketReady ? Color.foreground : Qt.darker(Color.foreground, 1.5)
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.bodySmall
-          }
-          MouseArea {
-            id: replayMouse
-            anchors.fill: parent
-            enabled: root.obsWebSocketReady
-            hoverEnabled: true
-            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-            onClicked: root.runAction(root.replayBuffer === true ? "replay.stop" : "replay.start")
-          }
+          fontFamily: root.bar.fontFamily
+          label: root.replaying ? "Stop Replay Buffer" : "Start Replay Buffer"
+          available: root.obsWebSocketReady
+          onClicked: root.runAction(root.replaying ? "replay.stop" : "replay.start")
         }
-
-        Rectangle {
+        StreamerButton {
           width: (parent.width - parent.spacing) / 2
-          height: Style.space(36)
-          radius: Style.cornerRadius
-          color: clipMouse.containsMouse ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.18) : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.07)
-          Text {
-            anchors.centerIn: parent
-            text: "Save Clip"
-            color: root.replayBuffer === true ? Color.foreground : Qt.darker(Color.foreground, 1.5)
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.body
-          }
-          MouseArea {
-            id: clipMouse
-            anchors.fill: parent
-            enabled: root.obsWebSocketReady && root.replayBuffer === true
-            hoverEnabled: true
-            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-            onClicked: root.runAction("clip.save")
-          }
+          fontFamily: root.bar.fontFamily
+          label: "Save Clip"
+          available: root.obsWebSocketReady && root.replaying
+          onClicked: root.runAction("clip.save")
         }
       }
 
       Row {
         width: parent.width
         spacing: Style.space(8)
-
         QQC.TextField {
           id: sceneField
           width: parent.width - sceneButton.width - parent.spacing
@@ -375,36 +376,67 @@ BarWidget {
           }
           onAccepted: if (text.trim() !== "") root.runAction("scene.set", text.trim())
         }
-
-        Rectangle {
+        StreamerButton {
           id: sceneButton
-          width: Style.space(96)
-          height: Style.space(36)
-          radius: Style.cornerRadius
-          color: sceneMouse.containsMouse ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.18) : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.07)
-          Text {
-            anchors.centerIn: parent
-            text: "Set Scene"
-            color: root.obsWebSocketReady && sceneField.text.trim() !== "" ? Color.foreground : Qt.darker(Color.foreground, 1.5)
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.body
-          }
-          MouseArea {
-            id: sceneMouse
-            anchors.fill: parent
-            enabled: root.obsWebSocketReady && sceneField.text.trim() !== ""
-            hoverEnabled: true
-            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-            onClicked: root.runAction("scene.set", sceneField.text.trim())
-          }
+          width: Style.space(100)
+          fontFamily: root.bar.fontFamily
+          label: "Set Scene"
+          available: root.obsWebSocketReady && sceneField.text.trim() !== ""
+          onClicked: root.runAction("scene.set", sceneField.text.trim())
         }
       }
 
-      Rectangle {
+      Rectangle { width: parent.width; height: Style.space(1); color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.16) }
+
+      Text {
         width: parent.width
-        height: Style.space(1)
-        color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.16)
+        text: "Stream-Safe Workspace"
+        color: Color.foreground
+        font.family: root.bar.fontFamily
+        font.pixelSize: Style.font.subtitle
+        font.bold: true
       }
+
+      Text {
+        width: parent.width
+        text: root.safetyReady
+              ? ("Workspace: " + (root.workspaceName || "unknown") + (root.streamSafeActive ? "  ·  STREAM-SAFE" : "") + (root.sensitiveActive ? "\n⚠ Sensitive window detected" : "\nActive window check: clear"))
+              : ("Stream-Safe unavailable" + (root.safetyError ? ": " + root.safetyError : ""))
+        color: root.sensitiveActive ? Color.urgent : Color.foreground
+        font.family: root.bar.fontFamily
+        font.pixelSize: Style.font.bodySmall
+        wrapMode: Text.Wrap
+      }
+
+      Row {
+        width: parent.width
+        spacing: Style.space(8)
+        StreamerButton {
+          width: (parent.width - parent.spacing) / 2
+          fontFamily: root.bar.fontFamily
+          label: root.streamSafeActive ? "Return Workspace" : "Enter Stream-Safe"
+          available: root.safetyReady || root.streamSafeActive
+          onClicked: root.runAction(root.streamSafeActive ? "workspace.exit" : "workspace.enter")
+        }
+        StreamerButton {
+          width: (parent.width - parent.spacing) / 2
+          fontFamily: root.bar.fontFamily
+          label: "Refresh Safety"
+          onClicked: root.runAction("safety.refresh")
+        }
+      }
+
+      Text {
+        visible: root.sensitiveActive
+        width: parent.width
+        text: "Warning only: Omarchy Streamer does not hide, close, or move this app automatically."
+        color: Color.urgent
+        font.family: root.bar.fontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.Wrap
+      }
+
+      Rectangle { width: parent.width; height: Style.space(1); color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.16) }
 
       Text {
         width: parent.width
@@ -417,12 +449,7 @@ BarWidget {
 
       Text {
         width: parent.width
-        text: root.selectedSourceName !== ""
-              ? ("Mic: " + root.selectedSourceName
-                 + (root.selectedSourcePresent ? "" : "  ·  MISSING")
-                 + (root.micVolumePercent !== null ? "\nVolume " + Math.round(root.micVolumePercent) + "%" : "")
-                 + (root.micMuted === true ? "  ·  MUTED" : ""))
-              : (root.audioReady ? "No microphone selected" : "Audio Desk unavailable")
+        text: root.selectedSourceName !== "" ? ("Mic: " + root.selectedSourceName + (root.selectedSourcePresent ? "" : "  ·  MISSING") + (root.micVolumePercent !== null ? "\nVolume " + Math.round(root.micVolumePercent) + "%" : "") + (root.micMuted === true ? "  ·  MUTED" : "")) : (root.audioReady ? "No microphone selected" : "Audio Desk unavailable")
         color: root.micWarning ? Color.urgent : Color.foreground
         font.family: root.bar.fontFamily
         font.pixelSize: Style.font.bodySmall
@@ -432,82 +459,37 @@ BarWidget {
       Row {
         width: parent.width
         spacing: Style.space(8)
-
-        Rectangle {
+        StreamerButton {
           width: (parent.width - parent.spacing) / 2
-          height: Style.space(36)
-          radius: Style.cornerRadius
-          color: nextMicMouse.containsMouse ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.18) : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.07)
-          Text {
-            anchors.centerIn: parent
-            text: root.audioSources.length > 1 ? "Next Mic" : "Select Mic"
-            color: root.audioSources.length > 0 ? Color.foreground : Qt.darker(Color.foreground, 1.5)
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.body
-          }
-          MouseArea {
-            id: nextMicMouse
-            anchors.fill: parent
-            enabled: root.audioSources.length > 0
-            hoverEnabled: true
-            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-            onClicked: root.runAction("mic.next")
-          }
+          fontFamily: root.bar.fontFamily
+          label: root.audioSources.length > 1 ? "Next Mic" : "Select Mic"
+          available: root.audioSources.length > 0
+          onClicked: root.runAction("mic.next")
         }
-
-        Rectangle {
+        StreamerButton {
           width: (parent.width - parent.spacing) / 2
-          height: Style.space(36)
-          radius: Style.cornerRadius
-          color: muteMouse.containsMouse ? Qt.rgba(Color.urgent.r, Color.urgent.g, Color.urgent.b, 0.18) : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.07)
-          Text {
-            anchors.centerIn: parent
-            text: root.micMuted === true ? "Unmute Mic" : "Mute Mic"
-            color: root.micMuted === true ? Color.urgent : (root.selectedSourcePresent ? Color.foreground : Qt.darker(Color.foreground, 1.5))
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.body
-            font.bold: root.micMuted === true
-          }
-          MouseArea {
-            id: muteMouse
-            anchors.fill: parent
-            enabled: root.selectedSourcePresent
-            hoverEnabled: true
-            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-            onClicked: root.runAction(root.micMuted === true ? "mic.unmute" : "mic.mute")
-          }
+          fontFamily: root.bar.fontFamily
+          label: root.micMuted === true ? "Unmute Mic" : "Mute Mic"
+          available: root.selectedSourcePresent
+          danger: root.micMuted === true
+          emphasis: root.micMuted === true
+          onClicked: root.runAction(root.micMuted === true ? "mic.unmute" : "mic.mute")
         }
       }
 
       Row {
         width: parent.width
         spacing: Style.space(8)
-
-        Rectangle {
+        StreamerButton {
           width: Style.space(72)
-          height: Style.space(34)
-          radius: Style.cornerRadius
-          color: volumeDownMouse.containsMouse ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.18) : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.07)
-          Text {
-            anchors.centerIn: parent
-            text: "−5%"
-            color: root.selectedSourcePresent ? Color.foreground : Qt.darker(Color.foreground, 1.5)
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.body
-          }
-          MouseArea {
-            id: volumeDownMouse
-            anchors.fill: parent
-            enabled: root.selectedSourcePresent && root.micVolumePercent !== null
-            hoverEnabled: true
-            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-            onClicked: root.setMicVolumeDelta(-5)
-          }
+          fontFamily: root.bar.fontFamily
+          label: "−5%"
+          available: root.selectedSourcePresent && root.micVolumePercent !== null
+          onClicked: root.setMicVolumeDelta(-5)
         }
-
         Text {
           width: parent.width - Style.space(152)
-          height: Style.space(34)
+          height: Style.space(36)
           verticalAlignment: Text.AlignVCenter
           horizontalAlignment: Text.AlignHCenter
           text: root.micVolumePercent === null ? "Volume —" : "Mic " + Math.round(root.micVolumePercent) + "%"
@@ -515,27 +497,12 @@ BarWidget {
           font.family: root.bar.fontFamily
           font.pixelSize: Style.font.bodySmall
         }
-
-        Rectangle {
+        StreamerButton {
           width: Style.space(72)
-          height: Style.space(34)
-          radius: Style.cornerRadius
-          color: volumeUpMouse.containsMouse ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.18) : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.07)
-          Text {
-            anchors.centerIn: parent
-            text: "+5%"
-            color: root.selectedSourcePresent ? Color.foreground : Qt.darker(Color.foreground, 1.5)
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.body
-          }
-          MouseArea {
-            id: volumeUpMouse
-            anchors.fill: parent
-            enabled: root.selectedSourcePresent && root.micVolumePercent !== null
-            hoverEnabled: true
-            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-            onClicked: root.setMicVolumeDelta(5)
-          }
+          fontFamily: root.bar.fontFamily
+          label: "+5%"
+          available: root.selectedSourcePresent && root.micVolumePercent !== null
+          onClicked: root.setMicVolumeDelta(5)
         }
       }
 
@@ -552,48 +519,19 @@ BarWidget {
       Row {
         width: parent.width
         spacing: Style.space(8)
-
-        Rectangle {
+        StreamerButton {
           width: (parent.width - parent.spacing) / 2
-          height: Style.space(36)
-          radius: Style.cornerRadius
-          color: obsMouse.containsMouse ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.18) : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.07)
-          Text {
-            anchors.centerIn: parent
-            text: root.obsRunning ? "OBS Running" : "Launch OBS"
-            color: root.obsInstalled ? Color.foreground : Qt.darker(Color.foreground, 1.5)
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.body
-          }
-          MouseArea {
-            id: obsMouse
-            anchors.fill: parent
-            enabled: root.obsInstalled && !root.obsRunning
-            hoverEnabled: true
-            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-            onClicked: root.runAction("obs.launch")
-          }
+          fontFamily: root.bar.fontFamily
+          label: root.obsRunning ? "OBS Running" : "Launch OBS"
+          available: root.obsInstalled && !root.obsRunning
+          onClicked: root.runAction("obs.launch")
         }
-
-        Rectangle {
+        StreamerButton {
           width: (parent.width - parent.spacing) / 2
-          height: Style.space(36)
-          radius: Style.cornerRadius
-          color: privacyMouse.containsMouse ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.18) : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.07)
-          Text {
-            anchors.centerIn: parent
-            text: root.privacy ? "Privacy ON" : "Privacy off"
-            color: root.privacyWarning ? Color.urgent : Color.foreground
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.body
-          }
-          MouseArea {
-            id: privacyMouse
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.runAction(root.privacy ? "privacy.disable" : "privacy.enable")
-          }
+          fontFamily: root.bar.fontFamily
+          label: root.privacy ? "Privacy ON" : "Privacy off"
+          danger: root.privacyWarning
+          onClicked: root.runAction(root.privacy ? "privacy.disable" : "privacy.enable")
         }
       }
 
@@ -619,7 +557,7 @@ BarWidget {
 
       Text {
         width: parent.width
-        text: "v0.3 Audio Desk · selected mic control · no silent system-default changes"
+        text: "v0.4 Stream-Safe · emergency controls · sensitive-window warnings"
         color: Qt.darker(Color.foreground, 1.35)
         font.family: root.bar.fontFamily
         font.pixelSize: Style.font.caption
