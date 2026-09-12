@@ -2,46 +2,39 @@
 
 An all-in-one Streamer Mode for **Omarchy Quattro**.
 
-Omarchy Streamer turns an Omarchy desktop into a deliberate creator/streaming workspace with OBS control, PipeWire-aware audio controls, reversible privacy protection, Stream-Safe workspace tools, managed browser guests, callback-backed guest control, emergency actions, guided onboarding, and a stable local action surface for future integrations.
+Omarchy Streamer turns an Omarchy desktop into a deliberate creator/streaming workspace with OBS control, PipeWire-aware audio controls, reversible privacy protection, Stream-Safe workspace tools, managed browser guests, callback-backed guest control, production profiles, guest layouts, emergency actions, guided onboarding, and a stable local action surface for future integrations.
 
-> Status: early **v0.8**. Core lifecycle, authenticated OBS control, Audio Desk, Stream-Safe workspace controls, managed collaboration guest slots, one-click OBS Browser Source provisioning, callback-backed guest presence/control, guided onboarding/preflight, emergency actions, bar UI, IPC, documentation, and CI coverage are in place. Real Omarchy/OBS/PipeWire/Hyprland and live provider-session validation are still required.
+> Status: early **v0.9**. Core lifecycle, authenticated OBS control, Audio Desk, Stream-Safe workspace controls, managed collaboration guest slots, callback-backed guest presence/control, deterministic OBS guest layouts, production profiles, guided onboarding/preflight, emergency actions, bar UI, IPC, documentation, and CI coverage are in place. Real Omarchy/OBS/PipeWire/Hyprland and live provider-session validation are still required.
 
-## Current v0.8
+## Current v0.9
 
 - Omarchy Quattro third-party plugin
 - bar widget + popup control panel
 - long-running service and explicit IPC target
-- native Quattro onboarding overlay
-- automatic one-time first-run walkthrough
-- replayable **Guide** from the Streamer panel
-- live preflight page for OBS, PipeWire, mic, privacy, Stream-Safe, and collaboration
-- full [User Guide](docs/USER_GUIDE.md)
-- symptom-based [Troubleshooting Guide](docs/TROUBLESHOOTING.md)
+- native Quattro onboarding overlay and replayable Guide
+- live preflight for OBS, PipeWire, mic, privacy, Stream-Safe, and collaboration
+- full [User Guide](docs/USER_GUIDE.md) and [Troubleshooting Guide](docs/TROUBLESHOOTING.md)
 - reversible Streamer Mode + notification DND state
 - authenticated OBS WebSocket v5 control
 - stream / recording / replay-buffer / clip / scene controls
 - LIVE / REC bar state from OBS
-- PipeWire / WirePlumber Audio Desk
-- remembered microphone selection without changing the desktop default
-- mic mute/unmute/toggle and volume controls
-- missing-microphone warnings
-- dedicated named **Stream-Safe** Hyprland workspace
-- warning-only sensitive-window guard
+- PipeWire / WirePlumber Audio Desk with remembered microphone selection
+- dedicated Stream-Safe Hyprland workspace and warning-only sensitive-window guard
 - emergency **End Live + Mute** and **Stop All Capture**
 - password-protected VDO.Ninja collaboration rooms
 - four managed guest slots with private per-slot identities
 - callback-backed guest ONLINE / OFFLINE / UNKNOWN / STALE state
 - managed guest remote mic on/off and disconnect actions
-- 15-second guest presence refresh while a collaboration room is active
-- per-slot invite and solo OBS URLs
+- production profiles: **Gaming / Recording / Podcast / Low-spec**
+- profile-controlled guest-presence refresh cadence
+- managed guest OBS layouts: **auto / single / split / grid / focus:<slot>**
+- profile-recommended guest layout action kept separate from profile selection
 - one-click group or individual guest Browser Source creation in OBS
 - room rotation and per-slot rotation to invalidate old links
-- local-only collaboration credential and guest-state storage with restrictive permissions
+- local-only collaboration/profile state with restrictive permissions
 - no room password, stream ID, control ID, secret URL, or window title in generic status
 - no control IDs passed on process command lines
-- no root requirement
-- no implicit `sudo`
-- no automatic package installation
+- no root requirement, no implicit `sudo`, no automatic package installation
 - no streaming-service stream keys stored by the plugin
 
 ## Install on Omarchy Quattro
@@ -66,53 +59,72 @@ Third-party Omarchy plugins are installed disabled so their code can be reviewed
 
 Missing requirements are reported. Omarchy Streamer does not silently install them.
 
-## Guided onboarding
+## Production profiles
 
-The first time the current onboarding version is seen, the long-running service summons the Streamer overlay once.
+Profiles are deliberately non-destructive. Selecting one never starts/stops a stream or recording and never changes streaming-service credentials.
 
-The seven pages cover:
+Current profiles:
 
-1. project/safety overview,
-2. live preflight checks,
-3. OBS control,
-4. Audio Desk,
-5. Stream-Safe + emergency controls,
-6. collaboration,
-7. ready-to-stream checklist.
+- **Gaming** — balanced live-gameplay defaults, 30-second guest refresh, auto guest layout.
+- **Recording** — local-recording oriented, 30-second guest refresh, auto guest layout.
+- **Podcast** — guest-focused, 15-second guest refresh, grid guest layout.
+- **Low-spec** — reduced background guest polling at 60 seconds, auto guest layout.
 
-**Skip** and **Finish** both mark the current tour version complete so it does not reopen every login. The main Streamer panel has a **Guide** button for replaying the tour without resetting first-run state.
+The panel exposes previous/next profile controls. Profile selection changes Streamer preferences only.
 
-IPC equivalents:
+Applying the active profile's guest layout is a separate explicit action:
 
 ```bash
-omarchy-shell io.github.drecullith.streamer action onboarding.open tour
-omarchy-shell io.github.drecullith.streamer action onboarding.open preflight
-omarchy-shell io.github.drecullith.streamer action onboarding.reset ""
+omarchy-shell io.github.drecullith.streamer action profile.layout ""
 ```
 
-Onboarding completion state contains no stream/collaboration credentials and is stored with user-only permissions where possible.
+That separation prevents a harmless profile selection from unexpectedly rearranging a live OBS scene.
+
+## Managed guest layouts
+
+The guest layout controller only targets OBS scene items named:
+
+```text
+Omarchy Streamer - Guest N
+```
+
+inside the dedicated collaboration scene. It does not touch gameplay, logos, alerts, webcams, or unrelated scene items.
+
+Supported presets:
+
+```text
+auto        1 guest = single, 2 = split, 3-4 = grid
+single      show only the first managed guest full canvas
+split       show the first two managed guests side-by-side
+grid        up to four managed guests in a 2x2 layout
+focus:<N>   feature Guest N with remaining managed guests in a side rail
+```
+
+Layouts use OBS WebSocket scene-item transforms and the current OBS base canvas size rather than assuming 1920x1080. The transform path is covered by fake OBS CI tests.
+
+Examples:
+
+```bash
+omarchy-shell io.github.drecullith.streamer action collab.layout auto
+omarchy-shell io.github.drecullith.streamer action collab.layout grid
+omarchy-shell io.github.drecullith.streamer action collab.layout focus:2
+```
+
+Because layout changes are visible production changes, `collab.layout` and `profile.layout` are confirmation-marked in the public action contract.
+
+## Guided onboarding
+
+The first time the current onboarding version is seen, the long-running service summons the Streamer overlay once. Skip/Finish marks that tour version complete; the panel's **Guide** button reopens it without resetting state.
+
+The seven pages cover project/safety overview, live preflight, OBS, Audio Desk, Stream-Safe/emergency controls, collaboration, and a ready-to-stream checklist.
 
 ## Controls
 
 Left-click **Stream** on the bar to open the panel. Right-click toggles Streamer Mode.
 
-The panel exposes Streamer Mode, the replayable Guide, stream/record/replay/clip/scene controls, Collaboration, managed guest slots, callback-backed guest state/control, Audio Desk, Stream-Safe workspace controls, privacy status, warnings, and emergency buttons.
+The panel exposes Streamer Mode, production profiles, the Guide, stream/record/replay/clip/scene controls, Collaboration, managed guest slots, guest state/control, guest layouts, Audio Desk, Stream-Safe, privacy status, warnings, and emergency buttons.
 
-## Managed guest workflow
-
-Each of the four managed guest slots has a human-facing slot number plus private VDO.Ninja stream/control identities. Those private IDs are deliberately excluded from normal Streamer status and IPC snapshots.
-
-A typical workflow:
-
-1. **Create Room**.
-2. Select Guest 1-4.
-3. **Copy Guest Invite** and send it privately.
-4. **Add Guest to OBS** to create/update that guest in the dedicated `Omarchy Guests` scene.
-5. When the guest page answers its private control callback, the panel can show it as **ONLINE**.
-6. Use **Mute Guest / Unmute Guest** or **Disconnect Guest** when needed.
-7. **Rotate Guest Link** to invalidate one slot, or **Rotate Room** to replace all room/slot credentials.
-
-### Guest presence and control semantics
+## Managed guest presence and control semantics
 
 Streamer does not treat a successful connection to the provider API server as proof that a guest is online.
 
@@ -129,15 +141,13 @@ stale
 error
 ```
 
-It never contains the room password, managed stream ID, or private page-control ID.
+The active profile controls background refresh cadence. Cached guest state becomes **STALE** after 30 seconds.
 
-The long-running service refreshes managed guest presence every 15 seconds while a collaboration room is active. Cached state becomes **STALE** after 30 seconds.
+Remote mic and disconnect actions use the private control capability loaded inside the collaboration controller. Control IDs are not exposed in generic status and are not placed on process command lines.
 
-Remote microphone commands also wait for the correlated callback before updating the cached mic state. Disconnect uses the managed guest page's private control capability and only marks the slot offline after its command callback.
+The provider WebSocket client and callback correlation are covered by a fake local provider in CI. Real VDO.Ninja browser-session behavior still needs hardware/session validation before the project claims field verification.
 
-The WebSocket client and callback correlation are covered by a fake local provider in CI. Real VDO.Ninja browser-session behavior still needs the hardware/session validation pass before this project claims field verification.
-
-### OBS provisioning rules
+## OBS collaboration provisioning
 
 Group source:
 
@@ -153,7 +163,7 @@ Scene:  Omarchy Guests
 Source: Omarchy Streamer - Guest N
 ```
 
-Browser Source provisioning is deliberately non-destructive: existing managed Browser Sources are updated/reused, but Streamer refuses to replace a source of another type that happens to use a reserved managed name.
+Browser Source provisioning is non-destructive: existing managed Browser Sources are updated/reused, but Streamer refuses to replace a source of another type that happens to use a reserved managed name.
 
 The scene name can be overridden with `OMARCHY_STREAMER_GUEST_SCENE`.
 
@@ -163,19 +173,15 @@ The first provider is **VDO.Ninja**. Room passwords, stream IDs, private page-co
 
 Secret-bearing links leave Streamer only through explicit copy/open actions. Guest links do **not** grant shell access, filesystem access, Streamer IPC access, OBS WebSocket access, or access to local Streamer state.
 
-Private page-control IDs are loaded from the user-only session file directly inside the collaboration controller and passed to the provider adapter in memory. They are not exposed in generic status and are not supplied as process command-line arguments.
-
 The plugin does not run a collaboration server, open a listener, change firewall rules, or proxy guest media.
 
 ## Stream-Safe and emergency actions
 
-`workspace.enter` records the current Hyprland workspace by name and switches to the dedicated `stream-safe` named workspace. It does not move, close, hide, or kill windows. `workspace.exit` restores the recorded workspace.
-
-Sensitive-window checks are warning-only. Window titles may be inspected locally for matching but are not serialized into status.
+`workspace.enter` records the current Hyprland workspace and switches to the dedicated `stream-safe` workspace. It does not move, close, hide, or kill windows. `workspace.exit` restores the recorded workspace.
 
 `emergency.end-live` best-effort enables privacy/DND, mutes the selected mic, enters Stream-Safe, and stops the live stream.
 
-`emergency.stop-all` performs the same sequence and also stops recording and replay buffer. One unavailable subsystem does not prevent the remaining emergency steps from being attempted.
+`emergency.stop-all` performs the same sequence and also stops recording and replay buffer. One unavailable subsystem does not prevent the remaining steps from being attempted.
 
 ## IPC
 
@@ -191,10 +197,11 @@ Examples:
 omarchy-shell io.github.drecullith.streamer status
 omarchy-shell io.github.drecullith.streamer action stream.start ""
 omarchy-shell io.github.drecullith.streamer action mic.mute ""
-omarchy-shell io.github.drecullith.streamer action workspace.enter ""
-omarchy-shell io.github.drecullith.streamer action collab.copy-slot-invite "1"
 omarchy-shell io.github.drecullith.streamer action collab.guest-refresh ""
 omarchy-shell io.github.drecullith.streamer action collab.guest-mute "1"
+omarchy-shell io.github.drecullith.streamer action collab.layout focus:1
+omarchy-shell io.github.drecullith.streamer action profile.apply podcast
+omarchy-shell io.github.drecullith.streamer action profile.layout ""
 omarchy-shell io.github.drecullith.streamer action onboarding.open tour
 ```
 
@@ -208,31 +215,33 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 BarWidget.qml
 Onboarding.qml ── guided overlay
       │
-Service.qml ── IPC / first-run summon / guest presence refresh
+Service.qml ── IPC / first-run summon / profile-aware guest refresh
       │
       └── bin/streamerctl
              ├── bin/obsws.py         ── authenticated localhost OBS WebSocket v5
              ├── bin/obsbrowser.py    ── safe Browser Source provisioning
+             ├── bin/guestlayout.py   ── managed guest scene-item transforms
              ├── bin/audioctl.py      ── WirePlumber/wpctl Audio Desk
              ├── bin/safetyctl.py     ── Hyprland workspace/window safety
              ├── bin/collabctl.py     ── browser rooms + managed guest state/actions
              ├── bin/vdoapi.py        ── private page-control WebSocket + callbacks
+             ├── bin/profilectl.py    ── production profile preferences
              └── bin/onboardingctl.py ── first-run completion state
 ```
 
 ## Roadmap
 
-### Next — deeper collaboration/audio
+### Next — real-machine validation and audio routing
 
 - real-session validation of callback-backed guest controls
-- per-guest PipeWire routing
-- guest-source layout helpers
+- identify trustworthy per-guest/application PipeWire stream nodes on the actual Omarchy machine
+- add per-guest audio routing only after those identities are proven stable enough
 - richer guest health/quality indicators where the provider exposes trustworthy data
 - camera controls only after live-session validation and UX review
 
-### Later — Stream profiles and integrations
+### Later
 
-- Gaming / Recording / Podcast / low-spec presets
+- configurable/custom production profiles
 - more capture-source awareness
 - configurable safety profiles
 - provider adapters beyond the first browser collaboration backend
@@ -242,12 +251,17 @@ Service.qml ── IPC / first-run summon / guest presence refresh
 
 Once a real Omarchy machine is available:
 
-- load-test the service/bar/overlay QML in Quattro,
+- load-test service/bar/overlay QML in Quattro,
 - verify first-run overlay focus and layout,
 - validate real OBS/PipeWire/Hyprland behavior,
 - test microphones, reconnects, sleep/wake and multi-display behavior,
-- run a real multi-guest collaboration session and validate page-control callbacks/mic/disconnect behavior,
-- capture real screenshots for the user/troubleshooting manuals.
+- run a real multi-guest collaboration session and validate callbacks/mic/disconnect/layout behavior,
+- inspect real PipeWire stream identities before implementing per-guest routing,
+- capture real screenshots for the manuals.
+
+## Why per-guest PipeWire routing is not in v0.9
+
+WirePlumber can inspect and control individual streams, and can restore per-stream target devices. However, correctly identifying which live PipeWire stream belongs to which browser guest is environment/session-specific. v0.9 intentionally does not guess at that mapping because an incorrect guess could mute or reroute the wrong application. That feature stays behind real-machine validation.
 
 ## Safety principles
 
