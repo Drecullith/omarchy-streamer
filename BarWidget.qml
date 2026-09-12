@@ -22,6 +22,15 @@ BarWidget {
   property var replayBuffer: null
   property string currentScene: ""
   property string obsWebSocketError: ""
+
+  property bool audioReady: false
+  property var audioSources: []
+  property string selectedSourceName: ""
+  property bool selectedSourcePresent: false
+  property var micMuted: null
+  property var micVolumePercent: null
+  property string audioError: ""
+
   property string dndState: "unknown"
   property string statusBuffer: ""
   property string actionMessage: ""
@@ -30,6 +39,7 @@ BarWidget {
   readonly property bool rec: root.recording === true
   readonly property bool captureActive: root.live || root.rec
   readonly property bool privacyWarning: root.captureActive && !root.privacy
+  readonly property bool micWarning: root.selectedSourceName !== "" && !root.selectedSourcePresent
   readonly property string barLabel: root.live ? "LIVE" : (root.rec ? "REC" : (root.active ? "STREAM" : "Stream"))
 
   implicitWidth: statusRow.implicitWidth + Style.space(14)
@@ -39,6 +49,7 @@ BarWidget {
     try {
       var state = JSON.parse(String(raw || "{}"))
       var obs = state.obsWebSocket || {}
+      var audio = state.audio || {}
       root.active = !!state.active
       root.privacy = !!state.privacy
       root.obsInstalled = !!state.obsInstalled
@@ -50,6 +61,15 @@ BarWidget {
       root.replayBuffer = obs.replayBuffer === null || obs.replayBuffer === undefined ? null : !!obs.replayBuffer
       root.currentScene = String(obs.currentScene || "")
       root.obsWebSocketError = String(obs.error || "")
+
+      root.audioReady = !!audio.ready
+      root.audioSources = Array.isArray(audio.sources) ? audio.sources : []
+      root.selectedSourceName = String(audio.selectedSourceName || "")
+      root.selectedSourcePresent = !!audio.selectedPresent
+      root.micMuted = audio.muted === null || audio.muted === undefined ? null : !!audio.muted
+      root.micVolumePercent = audio.volumePercent === null || audio.volumePercent === undefined ? null : Number(audio.volumePercent)
+      root.audioError = String(audio.error || "")
+
       root.dndState = String(state.dndState || "unknown")
       if (!sceneField.activeFocus && root.currentScene !== "") sceneField.text = root.currentScene
     } catch (e) {}
@@ -68,6 +88,12 @@ BarWidget {
     root.actionMessage = "Working…"
     actionProc.command = argv
     actionProc.running = true
+  }
+
+  function setMicVolumeDelta(delta) {
+    if (root.micVolumePercent === null || root.micVolumePercent === undefined) return
+    var next = Math.max(0, Math.min(150, Number(root.micVolumePercent) + delta))
+    root.runAction("mic.volume", Math.round(next))
   }
 
   function close() { root.popupOpen = false }
@@ -128,7 +154,7 @@ BarWidget {
 
     Text {
       text: root.captureActive ? "●" : (root.active ? "●" : "○")
-      color: root.captureActive || root.privacyWarning ? Color.urgent : (root.active ? Color.accent : root.bar.barForeground)
+      color: root.captureActive || root.privacyWarning || root.micWarning ? Color.urgent : (root.active ? Color.accent : root.bar.barForeground)
       font.family: root.bar.fontFamily
       font.pixelSize: Style.font.body
       anchors.verticalCenter: parent.verticalCenter
@@ -166,7 +192,7 @@ BarWidget {
     bar: root.bar
     owner: root
     open: root.popupOpen
-    contentWidth: popup.fittedContentWidth(Style.space(390))
+    contentWidth: popup.fittedContentWidth(Style.space(410))
     contentHeight: popup.fittedContentHeight(content.implicitHeight)
 
     Column {
@@ -374,6 +400,155 @@ BarWidget {
         }
       }
 
+      Rectangle {
+        width: parent.width
+        height: Style.space(1)
+        color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.16)
+      }
+
+      Text {
+        width: parent.width
+        text: "Audio Desk"
+        color: Color.foreground
+        font.family: root.bar.fontFamily
+        font.pixelSize: Style.font.subtitle
+        font.bold: true
+      }
+
+      Text {
+        width: parent.width
+        text: root.selectedSourceName !== ""
+              ? ("Mic: " + root.selectedSourceName
+                 + (root.selectedSourcePresent ? "" : "  ·  MISSING")
+                 + (root.micVolumePercent !== null ? "\nVolume " + Math.round(root.micVolumePercent) + "%" : "")
+                 + (root.micMuted === true ? "  ·  MUTED" : ""))
+              : (root.audioReady ? "No microphone selected" : "Audio Desk unavailable")
+        color: root.micWarning ? Color.urgent : Color.foreground
+        font.family: root.bar.fontFamily
+        font.pixelSize: Style.font.bodySmall
+        wrapMode: Text.Wrap
+      }
+
+      Row {
+        width: parent.width
+        spacing: Style.space(8)
+
+        Rectangle {
+          width: (parent.width - parent.spacing) / 2
+          height: Style.space(36)
+          radius: Style.cornerRadius
+          color: nextMicMouse.containsMouse ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.18) : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.07)
+          Text {
+            anchors.centerIn: parent
+            text: root.audioSources.length > 1 ? "Next Mic" : "Select Mic"
+            color: root.audioSources.length > 0 ? Color.foreground : Qt.darker(Color.foreground, 1.5)
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.body
+          }
+          MouseArea {
+            id: nextMicMouse
+            anchors.fill: parent
+            enabled: root.audioSources.length > 0
+            hoverEnabled: true
+            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+            onClicked: root.runAction("mic.next")
+          }
+        }
+
+        Rectangle {
+          width: (parent.width - parent.spacing) / 2
+          height: Style.space(36)
+          radius: Style.cornerRadius
+          color: muteMouse.containsMouse ? Qt.rgba(Color.urgent.r, Color.urgent.g, Color.urgent.b, 0.18) : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.07)
+          Text {
+            anchors.centerIn: parent
+            text: root.micMuted === true ? "Unmute Mic" : "Mute Mic"
+            color: root.micMuted === true ? Color.urgent : (root.selectedSourcePresent ? Color.foreground : Qt.darker(Color.foreground, 1.5))
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.body
+            font.bold: root.micMuted === true
+          }
+          MouseArea {
+            id: muteMouse
+            anchors.fill: parent
+            enabled: root.selectedSourcePresent
+            hoverEnabled: true
+            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+            onClicked: root.runAction(root.micMuted === true ? "mic.unmute" : "mic.mute")
+          }
+        }
+      }
+
+      Row {
+        width: parent.width
+        spacing: Style.space(8)
+
+        Rectangle {
+          width: Style.space(72)
+          height: Style.space(34)
+          radius: Style.cornerRadius
+          color: volumeDownMouse.containsMouse ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.18) : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.07)
+          Text {
+            anchors.centerIn: parent
+            text: "−5%"
+            color: root.selectedSourcePresent ? Color.foreground : Qt.darker(Color.foreground, 1.5)
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.body
+          }
+          MouseArea {
+            id: volumeDownMouse
+            anchors.fill: parent
+            enabled: root.selectedSourcePresent && root.micVolumePercent !== null
+            hoverEnabled: true
+            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+            onClicked: root.setMicVolumeDelta(-5)
+          }
+        }
+
+        Text {
+          width: parent.width - Style.space(152)
+          height: Style.space(34)
+          verticalAlignment: Text.AlignVCenter
+          horizontalAlignment: Text.AlignHCenter
+          text: root.micVolumePercent === null ? "Volume —" : "Mic " + Math.round(root.micVolumePercent) + "%"
+          color: Color.foreground
+          font.family: root.bar.fontFamily
+          font.pixelSize: Style.font.bodySmall
+        }
+
+        Rectangle {
+          width: Style.space(72)
+          height: Style.space(34)
+          radius: Style.cornerRadius
+          color: volumeUpMouse.containsMouse ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.18) : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.07)
+          Text {
+            anchors.centerIn: parent
+            text: "+5%"
+            color: root.selectedSourcePresent ? Color.foreground : Qt.darker(Color.foreground, 1.5)
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.body
+          }
+          MouseArea {
+            id: volumeUpMouse
+            anchors.fill: parent
+            enabled: root.selectedSourcePresent && root.micVolumePercent !== null
+            hoverEnabled: true
+            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+            onClicked: root.setMicVolumeDelta(5)
+          }
+        }
+      }
+
+      Text {
+        visible: root.micWarning || (root.audioError !== "" && root.pipewireReady)
+        width: parent.width
+        text: root.micWarning ? "⚠ Selected microphone disappeared. Choose another mic before going live." : ("Audio: " + root.audioError)
+        color: Color.urgent
+        font.family: root.bar.fontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.Wrap
+      }
+
       Row {
         width: parent.width
         spacing: Style.space(8)
@@ -444,7 +619,7 @@ BarWidget {
 
       Text {
         width: parent.width
-        text: "v0.2 OBS control · WebSocket authentication stays enabled · no stream keys stored"
+        text: "v0.3 Audio Desk · selected mic control · no silent system-default changes"
         color: Qt.darker(Color.foreground, 1.35)
         font.family: root.bar.fontFamily
         font.pixelSize: Style.font.caption
