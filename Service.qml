@@ -69,6 +69,10 @@ Item {
   property bool profilePrivacyRecommended: true
   property string profileError: ""
 
+  property bool settingsReady: false
+  property int settingsSchemaVersion: 0
+  property string settingsError: ""
+
   property string dndState: "unknown"
   property bool dndManaged: false
   property string lastAction: ""
@@ -76,7 +80,7 @@ Item {
 
   function snapshot() {
     return {
-      version: 9,
+      version: 10,
       active: root.active,
       privacy: root.privacy,
       obsInstalled: root.obsInstalled,
@@ -130,6 +134,9 @@ Item {
       profileGuestLayout: root.profileGuestLayout,
       profilePrivacyRecommended: root.profilePrivacyRecommended,
       profileError: root.profileError,
+      settingsReady: root.settingsReady,
+      settingsSchemaVersion: root.settingsSchemaVersion,
+      settingsError: root.settingsError,
       dndState: root.dndState,
       dndManaged: root.dndManaged,
       lastAction: root.lastAction,
@@ -146,6 +153,7 @@ Item {
       var collab = state.collaboration || {}
       var onboarding = state.onboarding || {}
       var profiles = state.profiles || {}
+      var settings = state.settings || {}
 
       root.active = !!state.active
       root.privacy = !!state.privacy
@@ -208,6 +216,10 @@ Item {
       root.profileGuestLayout = String(profiles.guestLayout || "auto")
       root.profilePrivacyRecommended = profiles.privacyRecommended !== false
       root.profileError = String(profiles.error || "")
+
+      root.settingsReady = !!settings.ready
+      root.settingsSchemaVersion = Number(settings.schemaVersion || 0)
+      root.settingsError = String(settings.error || "")
 
       root.dndState = String(state.dndState || "unknown")
       root.dndManaged = !!state.dndManaged
@@ -283,6 +295,11 @@ Item {
       case "profile.next":
       case "profile.previous":
       case "profile.layout":
+      case "settings.set":
+      case "settings.reset":
+      case "state.migrate":
+      case "support.snapshot":
+      case "support.copy":
       case "onboarding.open":
       case "onboarding.complete":
       case "onboarding.reset":
