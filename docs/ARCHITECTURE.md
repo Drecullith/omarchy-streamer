@@ -2,51 +2,50 @@
 
 ## Goal
 
-Omarchy Streamer is a third-party Omarchy Quattro plugin that turns a normal desktop session into a deliberate streaming/recording workspace without hiding privileged actions or taking permanent ownership of user settings.
+Omarchy Streamer is a third-party Omarchy Quattro plugin that coordinates streaming and recording without hidden privileged actions or permanent ownership of user settings.
 
-The v0.3 architecture has five layers:
+The v0.4 architecture has five main pieces:
 
-1. `BarWidget.qml` — user-facing status and fast controls.
+1. `BarWidget.qml` — user-facing status and controls.
 2. `Service.qml` — long-lived Quickshell service and IPC boundary.
-3. `bin/streamerctl` — user-level controller for mode state, health and reversible privacy changes.
-4. `bin/obsws.py` — localhost OBS WebSocket v5 adapter implemented with the Python standard library.
-5. `bin/audioctl.py` — WirePlumber/wpctl Audio Desk controller.
+3. `bin/streamerctl` — action router, reversible mode/privacy state, and composite emergency actions.
+4. `bin/obsws.py` — localhost OBS WebSocket v5 adapter.
+5. `bin/audioctl.py` / `bin/safetyctl.py` — WirePlumber audio and Hyprland stream-safety adapters.
 
 ## Core invariants
 
-- No root requirement.
-- No implicit `sudo`.
-- No package manager invocation.
-- Missing dependencies are reported, not silently installed.
-- State changed by Streamer Mode must be restorable when the mode is disabled.
-- Broadcast-affecting actions have stable names and are exposed through one action contract.
-- External automation must call the same explicit actions as the UI; it receives no hidden privileged path.
-- High-impact actions remain identifiable in the contract so callers can require confirmation before invoking them.
-- Stream keys and streaming-service credentials are not stored by Omarchy Streamer.
-- A missing selected microphone is reported rather than silently replaced.
-- Audio Desk selection does not silently overwrite the desktop-wide default microphone.
+- No root requirement or implicit `sudo`.
+- No package-manager invocation.
+- Missing dependencies are reported rather than installed.
+- State changed by Streamer Mode should be restorable.
+- UI and external integrations call the same explicit action contract.
+- Stream keys and streaming-service credentials are not stored.
+- Sensitive-window detection is warning-only.
+- Stream-Safe never auto-moves, closes, hides, or kills user windows.
+- Window titles are not exposed in status output.
+- Emergency actions continue best-effort when one subsystem is unavailable.
 
-## State
+## Runtime state
 
-Runtime state is stored under:
+State is stored under:
 
-`$XDG_STATE_HOME/omarchy-streamer/`
+```text
+$XDG_STATE_HOME/omarchy-streamer/
+```
 
-or, when `XDG_STATE_HOME` is unset:
+or `~/.local/state/omarchy-streamer/`.
 
-`~/.local/state/omarchy-streamer/`
+Current persisted state is limited to reversible control state such as Streamer Mode, privacy/DND restoration, Audio Desk mic selection, and the previous workspace used for Stream-Safe return.
 
-Marker files record active mode/privacy state plus a snapshot of the notification DND state that existed before Streamer Privacy was enabled.
+OBS output state remains authoritative in OBS and is queried live.
 
-Audio Desk stores only the selected PipeWire source node name in `audio.json`. Numeric PipeWire node IDs are treated as ephemeral and resolved again from WirePlumber whenever status or an audio action is requested.
-
-OBS state is **not** persisted as authoritative state. Stream/record/replay/scene state is queried from OBS itself.
-
-## IPC
+## IPC and action mediation
 
 The Quickshell service registers:
 
-`io.github.drecullith.streamer`
+```text
+io.github.drecullith.streamer
+```
 
 Primary calls:
 
@@ -60,95 +59,61 @@ disable
 toggle
 ```
 
-The stable action vocabulary is documented in `contracts/actions-v1.json`.
+The action vocabulary is defined in `contracts/actions-v1.json`. High-impact actions are explicitly marked so an external caller can require confirmation before invocation.
 
-The UI and external integrations share this same boundary. There is no separate unrestricted automation route.
+## Stream-Safe workspace
+
+`safetyctl.py` uses `hyprctl activeworkspace -j`, `hyprctl activewindow -j`, and explicit workspace dispatch.
+
+On `workspace.enter`:
+
+1. read the active workspace **name**,
+2. persist it with user-only file permissions where possible,
+3. switch to `name:stream-safe` (or the configured safe workspace).
+
+On `workspace.exit`, the recorded workspace is restored.
+
+Workspace names are used instead of persisted Hyprland IDs because named-workspace IDs are not stable across sessions.
+
+## Sensitive-window guard
+
+Rules are plain, case-insensitive substrings scoped to `class`, `title`, or `any`.
+
+Sources:
+
+```text
+config/sensitive-apps.txt
+~/.config/omarchy-streamer/sensitive-apps.txt
+```
+
+The active title can participate in local matching, but status only returns the active class and matched rule. This avoids serializing potentially sensitive title text into Streamer health state.
+
+A match raises a warning only. It does not manipulate the application.
+
+## Emergency actions
+
+`emergency.end-live` attempts, independently:
+
+- Streamer Privacy/DND on,
+- selected microphone mute,
+- Stream-Safe workspace entry,
+- OBS stream stop.
+
+`emergency.stop-all` additionally attempts recording and replay-buffer stop.
+
+The actions are intentionally best-effort. They do not abort the entire sequence because one adapter is unavailable.
 
 ## OBS integration
 
-OBS Studio 28+ includes obs-websocket. Omarchy Streamer speaks its v5 JSON protocol directly.
+OBS Studio 28+ includes obs-websocket. `obsws.py` speaks the v5 protocol directly using Python's standard library, keeps OBS password authentication intact, defaults to localhost, and stores no stream keys.
 
-Control flow:
+## Audio integration
 
-```text
-UI / IPC action
-      │
-      ▼
-Service.qml / streamerctl
-      │
-      ▼
-obsws.py
-      │
-      ▼
-127.0.0.1:4455 (default)
-      │
-      ▼
-OBS Studio
-```
-
-Implemented requests include:
-
-- `GetStreamStatus`, `StartStream`, `StopStream`
-- `GetRecordStatus`, `StartRecord`, `StopRecord`
-- `GetReplayBufferStatus`, `StartReplayBuffer`, `StopReplayBuffer`, `SaveReplayBuffer`
-- `GetSceneList`, `SetCurrentProgramScene`
-
-### OBS authentication and connection rules
-
-The adapter:
-
-- reads OBS's local `plugin_config/obs-websocket/config.json` by default,
-- uses OBS's configured WebSocket password for the v5 challenge/response handshake,
-- never writes that password into Streamer state,
-- defaults to localhost,
-- rejects a non-loopback host unless `OMARCHY_STREAMER_OBS_ALLOW_REMOTE=1` is explicitly set,
-- verifies the RFC 6455 WebSocket upgrade response,
-- masks client frames as required by the WebSocket protocol.
-
-## Audio Desk
-
-PipeWire is the native audio layer and WirePlumber's `wpctl` command is the v0.3 control boundary.
-
-Control flow:
-
-```text
-UI / IPC action
-      │
-      ▼
-Service.qml / streamerctl
-      │
-      ▼
-audioctl.py
-      │
-      ▼
-wpctl
-      │
-      ▼
-WirePlumber / PipeWire source node
-```
-
-The controller uses `wpctl list audio sources` for discovery, `wpctl get-volume` for volume/mute status, and `wpctl set-mute` / `wpctl set-volume` for control.
-
-The selected microphone is persisted by node name rather than object ID. If that name is no longer present, status reports `selectedPresent: false` and audio actions fail visibly until the user selects another source.
-
-Implemented Audio Desk actions:
-
-```text
-mic.select <sourceNameOrId>
-mic.next
-mic.mute
-mic.unmute
-mic.toggle
-mic.volume <0-150>
-```
-
-The first Audio Desk milestone intentionally does **not** rewrite PipeWire links or force a new system default. Deeper game/browser/collaborator routing belongs after physical-device testing.
+`audioctl.py` uses WirePlumber `wpctl`. It remembers a microphone by PipeWire node name and resolves the current numeric ID on demand. Missing selected devices are surfaced rather than silently replaced.
 
 ## Health model
 
-`streamerctl status` combines local mode/dependency state with live OBS and audio state.
-
-Important fields include:
+`streamerctl status` returns version 4 state containing:
 
 ```text
 active
@@ -160,56 +125,31 @@ wpctlInstalled
 pythonReady
 dndState
 dndManaged
-obsWebSocket.connected
-obsWebSocket.streaming
-obsWebSocket.recording
-obsWebSocket.replayBuffer
-obsWebSocket.currentScene
-obsWebSocket.error
-audio.ready
-audio.sources
-audio.selectedSourceName
-audio.selectedSourceId
-audio.selectedPresent
-audio.muted
-audio.volumePercent
-audio.error
+obsWebSocket.*
+audio.*
+safety.ready
+safety.workspaceName
+safety.streamSafeActive
+safety.sensitiveActive
+safety.sensitiveRule
+safety.activeWindowClass
+safety.error
 ```
 
-Unknown output/audio states are represented as `null` where appropriate rather than being presented as known-safe values.
-
-## Privacy roadmap
-
-v0.3 integrates with Omarchy notification DND and restores the user's prior DND state. The bar also raises a visible warning if OBS reports streaming/recording while Streamer Privacy is off.
-
-Later protections may include:
-
-- notification-history suppression during capture
-- stream-safe workspaces
-- sensitive-window warnings
-- clipboard-popup suppression
-- optional screen-share allowlists
-- emergency stop/mute controls
-
-Privacy protections should fail safe and visibly report when a requested protection could not be applied.
-
-## Collaboration
-
-Collaboration is adapter-based rather than a hard dependency on one communications product. The core should expose collaborator presence and room controls in a way that browser guests, Mode700, or other collaboration tools can use without changing Streamer Mode's lifecycle.
+Unknown/unreachable subsystems are represented explicitly rather than being presented as healthy.
 
 ## Tests
 
-CI currently validates:
+CI validates:
 
-- manifest and action-contract JSON,
-- controller shell syntax,
-- Python adapter/controller syntax,
-- safe status behavior when OBS/Omarchy/PipeWire tools are absent,
-- a fake local OBS WebSocket server exercising handshake + RPC,
-- stream/record/replay/clip/scene actions,
-- default rejection of unintended remote OBS hosts,
-- a fake `wpctl` environment covering microphone discovery, selection, mute and volume,
-- missing selected microphone handling without automatic substitution,
+- manifest and action contract,
+- shell/Python syntax,
+- safe status behavior without desktop services,
+- fake local OBS WebSocket RPC,
+- fake WirePlumber/wpctl behavior,
+- fake Hyprland workspace/window behavior,
+- sensitive-window title non-disclosure,
+- Stream-Safe workspace enter/restore,
 - public documentation remaining integration-neutral.
 
-The final missing class of validation is a real Omarchy Quattro + OBS + PipeWire machine test.
+The remaining validation class is real Omarchy Quattro + OBS + PipeWire + Hyprland hardware testing.
