@@ -8,7 +8,7 @@ Item {
   id: root
 
   readonly property string helperPath: Qt.resolvedUrl("bin/streamerctl").toString().replace(/^file:\/\//, "")
-  readonly property int stepCount: 7
+  readonly property int stepCount: 8
 
   property bool opened: false
   property bool firstRun: false
@@ -48,6 +48,7 @@ Item {
     var titles = [
       "Welcome to Omarchy Streamer",
       "Preflight check",
+      "Production Profiles",
       "OBS control",
       "Audio Desk",
       "Stream-Safe & emergency controls",
@@ -61,11 +62,12 @@ Item {
     var bodies = [
       "Omarchy Streamer puts OBS, microphone control, privacy, stream-safe workspace tools and browser guests behind one deliberate control surface. It does not silently install packages, ask for root, or close sensitive apps for you.",
       "This page checks the local pieces Streamer can see right now. A warning is not necessarily fatal: for example, OBS WebSocket cannot be connected until OBS itself is running.",
-      "Use the main panel to start or stop streaming, recording and the replay buffer, save clips, and switch scenes. OBS remains authoritative: Streamer talks to its authenticated localhost WebSocket instead of storing your stream keys.",
+      "Choose Gaming, Recording, Podcast or Low-spec to tune Streamer's production preferences and managed-guest refresh cadence. Selecting a profile never starts capture or rearranges OBS by itself. Guest layout application is always a separate deliberate action.",
+      "Use the main panel to start or stop streaming, recording and the replay buffer, save clips, switch scenes, and arrange only managed guest scene items. OBS remains authoritative: Streamer talks to its authenticated localhost WebSocket instead of storing your stream keys.",
       "Audio Desk remembers the microphone you selected and controls that PipeWire source directly. If the device disappears, Streamer warns you instead of silently switching to another microphone. Use the mute and volume controls before you go live.",
       "Streamer Privacy manages notification DND reversibly. Stream-Safe gives you a dedicated workspace and warns about sensitive windows without moving or killing them. End Live + Mute and Stop All Capture are the emergency buttons when something goes wrong.",
-      "Create a browser collaboration room, copy a guest invite, or use one of the four managed guest slots. Managed guests can be added to the dedicated Omarchy Guests scene in OBS. Secret room, stream and control IDs stay out of normal status and IPC output.",
-      "Start with OBS running, confirm your microphone, enable Streamer Mode, and glance at the privacy warnings before capture. You can reopen this tour later from the Streamer panel, and the full manual covers each workflow in detail."
+      "Create a browser collaboration room, copy a guest invite, or use one of the four managed guest slots. Managed guests can be added to the dedicated Omarchy Guests scene, monitored with callback-backed state, and arranged with auto/focus layouts. Secret room, stream and control IDs stay out of normal status and IPC output.",
+      "Start with OBS running, confirm your profile and microphone, enable Streamer Mode, and glance at privacy/guest warnings before capture. You can reopen this tour later from the Streamer panel, and the full manual covers each workflow in detail."
     ]
     return bodies[step]
   }
@@ -81,6 +83,7 @@ Item {
     var audio = s.audio || {}
     var safety = s.safety || {}
     var collab = s.collaboration || {}
+    var profiles = s.profiles || {}
     var dndKnown = String(s.dndState || "unknown") !== "unknown"
     var micKnown = String(audio.selectedSourceName || "") !== ""
     return mark(!!s.obsInstalled, false) + " OBS Studio installed\n"
@@ -89,6 +92,7 @@ Item {
          + mark(!!audio.selectedPresent, !micKnown) + " Microphone " + (audio.selectedPresent ? "ready" : (micKnown ? "missing" : "not selected yet")) + "\n"
          + mark(dndKnown, false) + " Omarchy notification privacy/DND available\n"
          + mark(!!safety.ready, false) + " Stream-Safe workspace controls available\n"
+         + mark(!!profiles.ready, false) + " Production profile " + String(profiles.activeLabel || "unavailable") + "\n"
          + mark(!!collab.ready, false) + " Collaboration controller ready"
   }
 
@@ -240,9 +244,9 @@ Item {
 
         Text {
           width: parent.width
-          text: root.step === 4 ? "Emergency actions are best-effort: if one subsystem is unavailable, Streamer still attempts the remaining safety steps." : (root.step === 5 ? "Guest links never grant shell, filesystem, Streamer IPC or OBS WebSocket access." : "")
+          text: root.step === 5 ? "Emergency actions are best-effort: if one subsystem is unavailable, Streamer still attempts the remaining safety steps." : (root.step === 6 ? "Guest links never grant shell, filesystem, Streamer IPC or OBS WebSocket access." : "")
           visible: text !== ""
-          color: root.step === 4 ? Color.urgent : Qt.darker(Color.foreground, 1.2)
+          color: root.step === 5 ? Color.urgent : Qt.darker(Color.foreground, 1.2)
           font.pixelSize: Style.font.caption
           wrapMode: Text.Wrap
         }
