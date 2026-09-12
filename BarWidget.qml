@@ -10,6 +10,7 @@ BarWidget {
   moduleName: "io.github.drecullith.streamer"
 
   readonly property string helperPath: Qt.resolvedUrl("bin/streamerctl").toString().replace(/^file:\/\//, "")
+
   property bool popupOpen: false
   property bool active: false
   property bool privacy: false
@@ -39,6 +40,15 @@ BarWidget {
   property string activeWindowClass: ""
   property string safetyError: ""
 
+  property bool collaborationReady: false
+  property bool collaborationActive: false
+  property string collaborationProviderLabel: ""
+  property bool collaborationClipboardReady: false
+  property bool collaborationBrowserReady: false
+  property bool collaborationInviteReady: false
+  property bool collaborationProgramUrlReady: false
+  property string collaborationError: ""
+
   property string dndState: "unknown"
   property string actionMessage: ""
 
@@ -60,6 +70,7 @@ BarWidget {
       var obs = state.obsWebSocket || {}
       var audio = state.audio || {}
       var safety = state.safety || {}
+      var collab = state.collaboration || {}
 
       root.active = !!state.active
       root.privacy = !!state.privacy
@@ -89,6 +100,15 @@ BarWidget {
       root.activeWindowClass = String(safety.activeWindowClass || "")
       root.safetyError = String(safety.error || "")
 
+      root.collaborationReady = !!collab.ready
+      root.collaborationActive = !!collab.active
+      root.collaborationProviderLabel = String(collab.providerLabel || "")
+      root.collaborationClipboardReady = !!collab.clipboardReady
+      root.collaborationBrowserReady = !!collab.browserReady
+      root.collaborationInviteReady = !!collab.inviteReady
+      root.collaborationProgramUrlReady = !!collab.programUrlReady
+      root.collaborationError = String(collab.error || "")
+
       root.dndState = String(state.dndState || "unknown")
       if (!sceneField.activeFocus && root.currentScene !== "") sceneField.text = root.currentScene
     } catch (e) {}
@@ -104,9 +124,18 @@ BarWidget {
     if (text === "") return
     try {
       var data = JSON.parse(text)
-      if (String(data.action || "").indexOf("emergency.") === 0) {
+      var action = String(data.action || "")
+      if (action.indexOf("emergency.") === 0) {
         root.actionMessage = "Emergency safety action applied"
         return
+      }
+      switch (action) {
+        case "collab.create": root.actionMessage = "Collaboration room ready"; return
+        case "collab.rotate": root.actionMessage = "Room rotated — old links are invalid"; return
+        case "collab.reset": root.actionMessage = "Collaboration room cleared"; return
+        case "collab.open-director": root.actionMessage = "Director opened in browser"; return
+        case "collab.copy-invite": root.actionMessage = "Guest invite copied"; return
+        case "collab.copy-program": root.actionMessage = "OBS group-scene URL copied"; return
       }
     } catch (e) {}
     root.actionMessage = text
@@ -225,7 +254,7 @@ BarWidget {
     bar: root.bar
     owner: root
     open: root.popupOpen
-    contentWidth: popup.fittedContentWidth(Style.space(420))
+    contentWidth: popup.fittedContentWidth(Style.space(430))
     contentHeight: popup.fittedContentHeight(content.implicitHeight)
 
     Column {
@@ -390,6 +419,110 @@ BarWidget {
 
       Text {
         width: parent.width
+        text: "Collaboration"
+        color: Color.foreground
+        font.family: root.bar.fontFamily
+        font.pixelSize: Style.font.subtitle
+        font.bold: true
+      }
+
+      Text {
+        width: parent.width
+        text: root.collaborationActive
+              ? ((root.collaborationProviderLabel || "Browser guest") + " room ready · credentials stay local")
+              : "No guest room yet · create one when collaborators are joining"
+        color: Color.foreground
+        font.family: root.bar.fontFamily
+        font.pixelSize: Style.font.bodySmall
+        wrapMode: Text.Wrap
+      }
+
+      Row {
+        width: parent.width
+        spacing: Style.space(8)
+        StreamerButton {
+          width: (parent.width - parent.spacing) / 2
+          fontFamily: root.bar.fontFamily
+          label: root.collaborationActive ? "Room Ready" : "Create Room"
+          available: root.collaborationReady && !root.collaborationActive
+          onClicked: root.runAction("collab.create")
+        }
+        StreamerButton {
+          width: (parent.width - parent.spacing) / 2
+          fontFamily: root.bar.fontFamily
+          label: "Open Director"
+          available: root.collaborationActive && root.collaborationBrowserReady
+          onClicked: root.runAction("collab.open-director")
+        }
+      }
+
+      Row {
+        width: parent.width
+        spacing: Style.space(8)
+        StreamerButton {
+          width: (parent.width - parent.spacing) / 2
+          fontFamily: root.bar.fontFamily
+          label: "Copy Guest Invite"
+          available: root.collaborationInviteReady && root.collaborationClipboardReady
+          onClicked: root.runAction("collab.copy-invite")
+        }
+        StreamerButton {
+          width: (parent.width - parent.spacing) / 2
+          fontFamily: root.bar.fontFamily
+          label: "Copy OBS Scene URL"
+          available: root.collaborationProgramUrlReady && root.collaborationClipboardReady
+          onClicked: root.runAction("collab.copy-program")
+        }
+      }
+
+      Row {
+        width: parent.width
+        spacing: Style.space(8)
+        StreamerButton {
+          width: (parent.width - parent.spacing) / 2
+          fontFamily: root.bar.fontFamily
+          label: "Rotate Room"
+          available: root.collaborationActive
+          danger: true
+          onClicked: root.runAction("collab.rotate")
+        }
+        StreamerButton {
+          width: (parent.width - parent.spacing) / 2
+          fontFamily: root.bar.fontFamily
+          label: "Clear Room"
+          available: root.collaborationActive
+          danger: true
+          onClicked: root.runAction("collab.reset")
+        }
+      }
+
+      Text {
+        visible: root.collaborationError !== "" || (root.collaborationActive && (!root.collaborationClipboardReady || !root.collaborationBrowserReady))
+        width: parent.width
+        text: root.collaborationError !== ""
+              ? ("Collaboration: " + root.collaborationError)
+              : ((!root.collaborationClipboardReady ? "wl-copy missing · invite copying unavailable" : "")
+                 + (!root.collaborationClipboardReady && !root.collaborationBrowserReady ? " · " : "")
+                 + (!root.collaborationBrowserReady ? "xdg-open missing · director launch unavailable" : ""))
+        color: Color.urgent
+        font.family: root.bar.fontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.Wrap
+      }
+
+      Text {
+        width: parent.width
+        text: "Guest and OBS links contain the room password. They are only released by explicit copy/open actions."
+        color: Qt.darker(Color.foreground, 1.25)
+        font.family: root.bar.fontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.Wrap
+      }
+
+      Rectangle { width: parent.width; height: Style.space(1); color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.16) }
+
+      Text {
+        width: parent.width
         text: "Stream-Safe Workspace"
         color: Color.foreground
         font.family: root.bar.fontFamily
@@ -449,7 +582,9 @@ BarWidget {
 
       Text {
         width: parent.width
-        text: root.selectedSourceName !== "" ? ("Mic: " + root.selectedSourceName + (root.selectedSourcePresent ? "" : "  ·  MISSING") + (root.micVolumePercent !== null ? "\nVolume " + Math.round(root.micVolumePercent) + "%" : "") + (root.micMuted === true ? "  ·  MUTED" : "")) : (root.audioReady ? "No microphone selected" : "Audio Desk unavailable")
+        text: root.selectedSourceName !== ""
+              ? ("Mic: " + root.selectedSourceName + (root.selectedSourcePresent ? "" : "  ·  MISSING") + (root.micVolumePercent !== null ? "\nVolume " + Math.round(root.micVolumePercent) + "%" : "") + (root.micMuted === true ? "  ·  MUTED" : ""))
+              : (root.audioReady ? "No microphone selected" : "Audio Desk unavailable")
         color: root.micWarning ? Color.urgent : Color.foreground
         font.family: root.bar.fontFamily
         font.pixelSize: Style.font.bodySmall
@@ -557,7 +692,7 @@ BarWidget {
 
       Text {
         width: parent.width
-        text: "v0.4 Stream-Safe · emergency controls · sensitive-window warnings"
+        text: "v0.5 Collaboration Core · browser guests · credential-safe room workflow"
         color: Qt.darker(Color.foreground, 1.35)
         font.family: root.bar.fontFamily
         font.pixelSize: Style.font.caption
