@@ -6,6 +6,7 @@ OBSWS="$SCRIPT_DIR/obsws.py"
 AUDIOCTL="$SCRIPT_DIR/audioctl.py"
 SAFETYCTL="$SCRIPT_DIR/safetyctl.py"
 COLLABCTL="$SCRIPT_DIR/collabctl.py"
+ONBOARDINGCTL="$SCRIPT_DIR/onboardingctl.py"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-streamer"
 ACTIVE_FILE="$STATE_DIR/active"
 PRIVACY_FILE="$STATE_DIR/privacy"
@@ -84,10 +85,26 @@ collab_status_json() {
   if [[ "$raw" == \{*\} ]]; then printf '%s' "$raw"; else printf '%s' '{"ready":false,"active":false,"provider":"","providerLabel":"","clipboardReady":false,"browserReady":false,"inviteReady":false,"programUrlReady":false,"managedSlotsReady":false,"slotCount":0,"obsSceneName":"","credentialsExposed":false,"error":"Collaboration status failed"}'; fi
 }
 
+onboarding_status_json() {
+  if ! have python3; then printf '%s' '{"ready":false,"tourVersion":1,"completed":false,"completedAt":null,"error":"python3 is required for onboarding"}'; return 0; fi
+  local raw
+  raw="$(python3 "$ONBOARDINGCTL" status 2>/dev/null || true)"
+  if [[ "$raw" == \{*\} ]]; then printf '%s' "$raw"; else printf '%s' '{"ready":false,"tourVersion":1,"completed":false,"completedAt":null,"error":"Onboarding status failed"}'; fi
+}
+
 run_obs_action() { local action="$1" arg="${2:-}"; if ! pgrep -x obs >/dev/null 2>&1; then printf 'error: OBS is not running\n' >&2; exit 6; fi; if ! have python3; then printf 'error: python3 is required for OBS WebSocket control\n' >&2; exit 6; fi; python3 "$OBSWS" action "$action" "$arg"; }
 run_audio_action() { local action="$1" arg="${2:-}"; if ! have python3; then printf 'error: python3 is required for Audio Desk\n' >&2; exit 7; fi; python3 "$AUDIOCTL" action "$action" "$arg"; }
 run_safety_action() { local action="$1"; if ! have python3; then printf 'error: python3 is required for Stream-Safe controls\n' >&2; exit 9; fi; python3 "$SAFETYCTL" action "$action"; }
 run_collab_action() { local action="$1" arg="${2:-}"; if ! have python3; then printf 'error: python3 is required for Collaboration\n' >&2; exit 10; fi; python3 "$COLLABCTL" action "$action" "$arg"; }
+run_onboarding_action() { local action="$1"; if ! have python3; then printf 'error: python3 is required for onboarding\n' >&2; exit 11; fi; python3 "$ONBOARDINGCTL" action "$action"; }
+
+onboarding_open() {
+  local mode="${1:-tour}"
+  case "$mode" in first-run|tour|preflight) ;; *) mode="tour" ;; esac
+  if ! have omarchy-shell; then printf 'error: omarchy-shell is required to open the guided tour\n' >&2; exit 11; fi
+  omarchy-shell shell summon io.github.drecullith.streamer "{\"mode\":\"$mode\"}" >/dev/null
+  printf '{"ok":true,"action":"onboarding.open","mode":"%s"}\n' "$mode"
+}
 
 best_effort_obs() { local action="$1"; if pgrep -x obs >/dev/null 2>&1 && have python3; then python3 "$OBSWS" action "$action" "" >/dev/null 2>&1 || true; fi; }
 
@@ -102,7 +119,7 @@ emergency_action() {
 }
 
 status_json() {
-  local active privacy obs_installed obs_running pipewire_ready wpctl_installed python_ready dnd_state dnd_managed obs_ws audio safety collab
+  local active privacy obs_installed obs_running pipewire_ready wpctl_installed python_ready dnd_state dnd_managed obs_ws audio safety collab onboarding
   active="$(file_bool "$ACTIVE_FILE")"; privacy="$(file_bool "$PRIVACY_FILE")"
   have obs && obs_installed=true || obs_installed=false
   pgrep -x obs >/dev/null 2>&1 && obs_running=true || obs_running=false
@@ -111,9 +128,9 @@ status_json() {
   have python3 && python_ready=true || python_ready=false
   dnd_state="$(notifications_dnd_state)"
   if [[ -r "$PREV_DND_FILE" ]] && [[ "$(head -n 1 "$PREV_DND_FILE" 2>/dev/null || true)" != "unknown" ]]; then dnd_managed=true; else dnd_managed=false; fi
-  obs_ws="$(obs_status_json)"; audio="$(audio_status_json)"; safety="$(safety_status_json)"; collab="$(collab_status_json)"
-  printf '{"version":6,"active":%s,"privacy":%s,"obsInstalled":%s,"obsRunning":%s,"pipewireReady":%s,"wpctlInstalled":%s,"pythonReady":%s,"dndState":"%s","dndManaged":%s,"obsWebSocket":%s,"audio":%s,"safety":%s,"collaboration":%s}\n' \
-    "$(json_bool "$active")" "$(json_bool "$privacy")" "$(json_bool "$obs_installed")" "$(json_bool "$obs_running")" "$(json_bool "$pipewire_ready")" "$(json_bool "$wpctl_installed")" "$(json_bool "$python_ready")" "$dnd_state" "$(json_bool "$dnd_managed")" "$obs_ws" "$audio" "$safety" "$collab"
+  obs_ws="$(obs_status_json)"; audio="$(audio_status_json)"; safety="$(safety_status_json)"; collab="$(collab_status_json)"; onboarding="$(onboarding_status_json)"
+  printf '{"version":7,"active":%s,"privacy":%s,"obsInstalled":%s,"obsRunning":%s,"pipewireReady":%s,"wpctlInstalled":%s,"pythonReady":%s,"dndState":"%s","dndManaged":%s,"obsWebSocket":%s,"audio":%s,"safety":%s,"collaboration":%s,"onboarding":%s}\n' \
+    "$(json_bool "$active")" "$(json_bool "$privacy")" "$(json_bool "$obs_installed")" "$(json_bool "$obs_running")" "$(json_bool "$pipewire_ready")" "$(json_bool "$wpctl_installed")" "$(json_bool "$python_ready")" "$dnd_state" "$(json_bool "$dnd_managed")" "$obs_ws" "$audio" "$safety" "$collab" "$onboarding"
 }
 
 run_action() {
@@ -131,6 +148,8 @@ run_action() {
     workspace.enter|workspace.exit|safety.refresh|window.check) run_safety_action "$action" ;;
     emergency.end-live|emergency.stop-all) emergency_action "$action" ;;
     collab.create|collab.rotate|collab.reset|collab.open-director|collab.copy-invite|collab.copy-program|collab.slot-rotate|collab.copy-slot-invite|collab.copy-slot-source|collab.obs-add-program|collab.obs-add-slot) run_collab_action "$action" "$arg" ;;
+    onboarding.open) onboarding_open "$arg" ;;
+    onboarding.complete|onboarding.reset) run_onboarding_action "$action" ;;
     *) printf 'error: unknown action: %s\n' "$action" >&2; exit 2 ;;
   esac
 }
