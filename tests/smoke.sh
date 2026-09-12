@@ -6,7 +6,7 @@ cd "$repo_root"
 
 python3 -m json.tool manifest.json >/dev/null
 python3 -m json.tool contracts/actions-v1.json >/dev/null
-python3 -m py_compile bin/obsws.py bin/obsbrowser.py bin/audioctl.py bin/safetyctl.py bin/collabctl.py tests/test_obsws.py tests/test_obsbrowser.py tests/test_audioctl.py tests/test_safetyctl.py tests/test_collabctl.py
+python3 -m py_compile bin/obsws.py bin/obsbrowser.py bin/audioctl.py bin/safetyctl.py bin/collabctl.py bin/onboardingctl.py tests/test_obsws.py tests/test_obsbrowser.py tests/test_audioctl.py tests/test_safetyctl.py tests/test_collabctl.py tests/test_onboardingctl.py
 bash -n bin/streamerctl
 
 python3 - <<'PY'
@@ -16,9 +16,11 @@ from pathlib import Path
 manifest = json.loads(Path("manifest.json").read_text())
 assert manifest["schemaVersion"] == 1
 assert manifest["id"] == "io.github.drecullith.streamer"
-assert {"service", "bar-widget"}.issubset(set(manifest["kinds"]))
+assert {"service", "bar-widget", "overlay"}.issubset(set(manifest["kinds"]))
 assert manifest["entryPoints"]["service"] == "Service.qml"
 assert manifest["entryPoints"]["barWidget"] == "BarWidget.qml"
+assert manifest["entryPoints"]["overlay"] == "Onboarding.qml"
+assert manifest["version"] == "0.7.0"
 
 contract = json.loads(Path("contracts/actions-v1.json").read_text())
 actions = {entry["id"]: entry for entry in contract["actions"]}
@@ -33,6 +35,7 @@ required = (
     "collab.copy-invite", "collab.copy-program", "collab.slot-rotate",
     "collab.copy-slot-invite", "collab.copy-slot-source",
     "collab.obs-add-program", "collab.obs-add-slot",
+    "onboarding.open", "onboarding.complete", "onboarding.reset",
 )
 for name in required:
     assert name in actions, name
@@ -47,6 +50,10 @@ for high_impact in (
     "collab.obs-add-program", "collab.obs-add-slot",
 ):
     assert actions[high_impact]["agentConfirmation"] == "required", high_impact
+
+assert actions["onboarding.open"]["agentConfirmation"] == "none"
+assert actions["onboarding.complete"]["agentConfirmation"] == "none"
+assert actions["onboarding.reset"]["agentConfirmation"] == "session"
 PY
 
 # Controllers must be safe to query on a generic CI machine.
@@ -55,8 +62,9 @@ python3 bin/obsws.py status | python3 -m json.tool >/dev/null
 python3 bin/audioctl.py status | python3 -m json.tool >/dev/null
 python3 bin/safetyctl.py status | python3 -m json.tool >/dev/null
 python3 bin/collabctl.py status | python3 -m json.tool >/dev/null
+python3 bin/onboardingctl.py status | python3 -m json.tool >/dev/null
 
-python3 -m unittest -v tests/test_obsws.py tests/test_obsbrowser.py tests/test_audioctl.py tests/test_safetyctl.py tests/test_collabctl.py
+python3 -m unittest -v tests/test_obsws.py tests/test_obsbrowser.py tests/test_audioctl.py tests/test_safetyctl.py tests/test_collabctl.py tests/test_onboardingctl.py
 
 # Future-integration architecture stays generic in the public project docs.
 if grep -Rin --exclude='*.pyc' --exclude-dir='__pycache__' 'lychnos' README.md docs contracts; then
@@ -69,5 +77,15 @@ if python3 bin/collabctl.py status | grep -E '"(room|password|streamId|controlId
   echo "collaboration status exposes credentials" >&2
   exit 1
 fi
+
+# The onboarding state model must remain free of streaming/collaboration secrets.
+if python3 bin/onboardingctl.py status | grep -E '"(room|password|streamId|controlId|inviteUrl|programUrl|directorUrl)"'; then
+  echo "onboarding status unexpectedly exposes sensitive fields" >&2
+  exit 1
+fi
+
+grep -q 'function open(payload)' Onboarding.qml
+grep -q 'FIRST-RUN GUIDE' Onboarding.qml
+grep -q 'docs/USER_GUIDE.md' Onboarding.qml
 
 echo "smoke tests passed"
