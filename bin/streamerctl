@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OBSWS="$SCRIPT_DIR/obsws.py"
+AUDIOCTL="$SCRIPT_DIR/audioctl.py"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-streamer"
 ACTIVE_FILE="$STATE_DIR/active"
 PRIVACY_FILE="$STATE_DIR/privacy"
@@ -111,6 +112,21 @@ obs_status_json() {
   fi
 }
 
+audio_status_json() {
+  if ! have python3; then
+    printf '%s' '{"ready":false,"sources":[],"selectedSourceName":"","selectedSourceId":null,"selectedPresent":false,"muted":null,"volumePercent":null,"error":"python3 is required for Audio Desk"}'
+    return 0
+  fi
+
+  local raw
+  raw="$(python3 "$AUDIOCTL" status 2>/dev/null || true)"
+  if [[ "$raw" == \{*\} ]]; then
+    printf '%s' "$raw"
+  else
+    printf '%s' '{"ready":false,"sources":[],"selectedSourceName":"","selectedSourceId":null,"selectedPresent":false,"muted":null,"volumePercent":null,"error":"Audio Desk status failed"}'
+  fi
+}
+
 run_obs_action() {
   local action="$1"
   local arg="${2:-}"
@@ -125,8 +141,18 @@ run_obs_action() {
   python3 "$OBSWS" action "$action" "$arg"
 }
 
+run_audio_action() {
+  local action="$1"
+  local arg="${2:-}"
+  if ! have python3; then
+    printf 'error: python3 is required for Audio Desk\n' >&2
+    exit 7
+  fi
+  python3 "$AUDIOCTL" action "$action" "$arg"
+}
+
 status_json() {
-  local active privacy obs_installed obs_running pipewire_ready wpctl_installed python_ready dnd_state dnd_managed obs_ws
+  local active privacy obs_installed obs_running pipewire_ready wpctl_installed python_ready dnd_state dnd_managed obs_ws audio
   active="$(file_bool "$ACTIVE_FILE")"
   privacy="$(file_bool "$PRIVACY_FILE")"
   have obs && obs_installed=true || obs_installed=false
@@ -141,8 +167,9 @@ status_json() {
     dnd_managed=false
   fi
   obs_ws="$(obs_status_json)"
+  audio="$(audio_status_json)"
 
-  printf '{"version":2,"active":%s,"privacy":%s,"obsInstalled":%s,"obsRunning":%s,"pipewireReady":%s,"wpctlInstalled":%s,"pythonReady":%s,"dndState":"%s","dndManaged":%s,"obsWebSocket":%s}\n' \
+  printf '{"version":3,"active":%s,"privacy":%s,"obsInstalled":%s,"obsRunning":%s,"pipewireReady":%s,"wpctlInstalled":%s,"pythonReady":%s,"dndState":"%s","dndManaged":%s,"obsWebSocket":%s,"audio":%s}\n' \
     "$(json_bool "$active")" \
     "$(json_bool "$privacy")" \
     "$(json_bool "$obs_installed")" \
@@ -152,7 +179,8 @@ status_json() {
     "$(json_bool "$python_ready")" \
     "$dnd_state" \
     "$(json_bool "$dnd_managed")" \
-    "$obs_ws"
+    "$obs_ws" \
+    "$audio"
 }
 
 run_action() {
@@ -177,9 +205,8 @@ run_action() {
       run_obs_action "$action" "$arg"
       ;;
 
-    mic.mute|mic.unmute)
-      printf 'unsupported:v0.3:%s\n' "$action" >&2
-      exit 8
+    mic.select|mic.next|mic.mute|mic.unmute|mic.toggle|mic.volume)
+      run_audio_action "$action" "$arg"
       ;;
 
     *)
