@@ -49,7 +49,9 @@ Item {
   property bool collaborationInviteReady: false
   property bool collaborationProgramUrlReady: false
   property bool collaborationManagedSlotsReady: false
+  property bool collaborationGuestControlReady: false
   property int collaborationSlotCount: 0
+  property var collaborationGuests: []
   property string collaborationObsSceneName: ""
   property string collaborationError: ""
 
@@ -66,7 +68,7 @@ Item {
 
   function snapshot() {
     return {
-      version: 7,
+      version: 8,
       active: root.active,
       privacy: root.privacy,
       obsInstalled: root.obsInstalled,
@@ -104,7 +106,9 @@ Item {
       collaborationInviteReady: root.collaborationInviteReady,
       collaborationProgramUrlReady: root.collaborationProgramUrlReady,
       collaborationManagedSlotsReady: root.collaborationManagedSlotsReady,
+      collaborationGuestControlReady: root.collaborationGuestControlReady,
       collaborationSlotCount: root.collaborationSlotCount,
+      collaborationGuests: root.collaborationGuests,
       collaborationObsSceneName: root.collaborationObsSceneName,
       collaborationError: root.collaborationError,
       onboardingReady: root.onboardingReady,
@@ -168,7 +172,9 @@ Item {
       root.collaborationInviteReady = !!collab.inviteReady
       root.collaborationProgramUrlReady = !!collab.programUrlReady
       root.collaborationManagedSlotsReady = !!collab.managedSlotsReady
+      root.collaborationGuestControlReady = !!collab.guestControlReady
       root.collaborationSlotCount = Number(collab.slotCount || 0)
+      root.collaborationGuests = Array.isArray(collab.guests) ? collab.guests : []
       root.collaborationObsSceneName = String(collab.obsSceneName || "")
       root.collaborationError = String(collab.error || "")
 
@@ -244,6 +250,10 @@ Item {
       case "collab.copy-slot-source":
       case "collab.obs-add-program":
       case "collab.obs-add-slot":
+      case "collab.guest-refresh":
+      case "collab.guest-mute":
+      case "collab.guest-unmute":
+      case "collab.guest-disconnect":
       case "onboarding.open":
       case "onboarding.complete":
       case "onboarding.reset":
@@ -260,6 +270,13 @@ Item {
     stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.applyStatus(text) }
   }
 
+  Process {
+    id: guestRefreshProc
+    command: ["bash", root.helperPath, "action", "collab.guest-refresh"]
+    running: false
+    onExited: delayedRefresh.restart()
+  }
+
   Timer { id: delayedRefresh; interval: 500; repeat: false; onTriggered: root.refreshStatus() }
   Timer {
     id: onboardingTimer
@@ -271,6 +288,14 @@ Item {
         Quickshell.execDetached(["bash", root.helperPath, "action", "onboarding.open", "first-run"])
       }
     }
+  }
+  Timer {
+    id: guestRefreshTimer
+    interval: 15000
+    repeat: true
+    running: root.collaborationActive && root.collaborationGuestControlReady
+    triggeredOnStart: true
+    onTriggered: if (!guestRefreshProc.running) guestRefreshProc.running = true
   }
   Timer { interval: 3000; repeat: true; running: true; triggeredOnStart: false; onTriggered: root.refreshStatus() }
 
