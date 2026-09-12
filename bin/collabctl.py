@@ -8,6 +8,7 @@ excluded from normal status output.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import importlib.util
 import json
 import os
@@ -25,8 +26,10 @@ PROVIDER_LABEL = "VDO.Ninja"
 BASE_URL = "https://vdo.ninja/"
 DEFAULT_SLOT_COUNT = 4
 DEFAULT_OBS_SCENE = os.environ.get("OMARCHY_STREAMER_GUEST_SCENE", "Omarchy Guests")
+GUEST_STATE_MAX_AGE = int(os.environ.get("OMARCHY_STREAMER_GUEST_STATE_MAX_AGE", "30"))
 STATE_ROOT = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "omarchy-streamer"
 SESSION_FILE = STATE_ROOT / "collab-session.json"
+GUEST_STATE_FILE = STATE_ROOT / "collab-guest-state.json"
 
 
 class CollabError(RuntimeError):
@@ -39,6 +42,26 @@ def ensure_state_dir() -> None:
         STATE_ROOT.chmod(0o700)
     except OSError:
         pass
+
+
+def secure_write_json(path: Path, value: Any) -> None:
+    ensure_state_dir()
+    temp = path.with_suffix(path.suffix + ".tmp")
+    payload = json.dumps(value, separators=(",", ":")) + "\n"
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temp, 0o600)
+        os.replace(temp, path)
+        os.chmod(path, 0o600)
+    finally:
+        try:
+            temp.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def new_slot(number: int) -> dict[str, Any]:
@@ -84,23 +107,7 @@ def validate_session(value: Any) -> dict[str, Any]:
 
 
 def save_session(session: dict[str, Any]) -> None:
-    ensure_state_dir()
-    temp = SESSION_FILE.with_suffix(".tmp")
-    payload = json.dumps(session, separators=(",", ":")) + "\n"
-    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.chmod(temp, 0o600)
-        os.replace(temp, SESSION_FILE)
-        os.chmod(SESSION_FILE, 0o600)
-    finally:
-        try:
-            temp.unlink()
-        except FileNotFoundError:
-            pass
+    secure_write_json(SESSION_FILE, session)
 
 
 def load_session() -> dict[str, Any] | None:
@@ -132,6 +139,7 @@ def create_session(force: bool = False) -> dict[str, Any]:
         "slots": [new_slot(i) for i in range(1, DEFAULT_SLOT_COUNT + 1)],
     }
     save_session(session)
+    clear_guest_state()
     return session
 
 
@@ -199,12 +207,165 @@ def open_director() -> None:
         raise CollabError(f"could not open collaboration director: {exc}") from exc
 
 
+def load_guest_state() -> list[dict[str, Any]]:
+    if not GUEST_STATE_FILE.is_file():
+        return []
+    try:
+        value = json.loads(GUEST_STATE_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(value, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for raw in value:
+        if not isinstance(raw, dict):
+            continue
+        try:
+            slot = int(raw.get("slot", 0))
+            checked_at = int(raw.get("checkedAt", 0))
+        except (TypeError, ValueError):
+            continue
+        if slot < 1:
+            continue
+        online = raw.get("online") if isinstance(raw.get("online"), bool) else None
+        mic_enabled = raw.get("micEnabled") if isinstance(raw.get("micEnabled"), bool) else None
+        error = str(raw.get("error", ""))[:32]
+        out.append({"slot": slot, "online": online, "micEnabled": mic_enabled, "checkedAt": checked_at, "error": error})
+    return out
+
+
+def save_guest_state(states: list[dict[str, Any]]) -> None:
+    secure_write_json(GUEST_STATE_FILE, states)
+
+
+def clear_guest_state(slot_number: int | None = None) -> None:
+    if slot_number is None:
+        try:
+            GUEST_STATE_FILE.unlink()
+        except FileNotFoundError:
+            pass
+        return
+    remaining = [entry for entry in load_guest_state() if int(entry.get("slot", 0)) != int(slot_number)]
+    if remaining:
+        save_guest_state(remaining)
+    else:
+        clear_guest_state()
+
+
+def update_guest_state(slot_number: int, *, online: bool | None, mic_enabled: bool | None = None, error: str = "") -> dict[str, Any]:
+    states = {int(entry["slot"]): dict(entry) for entry in load_guest_state()}
+    previous = states.get(int(slot_number), {})
+    if mic_enabled is None and online is True:
+        previous_mic = previous.get("micEnabled")
+        mic_enabled = previous_mic if isinstance(previous_mic, bool) else None
+    entry = {
+        "slot": int(slot_number),
+        "online": online,
+        "micEnabled": mic_enabled if online is True else None,
+        "checkedAt": int(time.time()),
+        "error": str(error)[:32],
+    }
+    states[int(slot_number)] = entry
+    save_guest_state([states[key] for key in sorted(states)])
+    return entry
+
+
+def safe_guest_states(session: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if session is None:
+        return []
+    cached = {int(entry["slot"]): entry for entry in load_guest_state()}
+    now = int(time.time())
+    result: list[dict[str, Any]] = []
+    for slot in session.get("slots", []):
+        number = int(slot["slot"])
+        entry = cached.get(number)
+        if not entry:
+            result.append({"slot": number, "online": None, "micEnabled": None, "checkedAt": 0, "stale": True, "error": ""})
+            continue
+        checked_at = int(entry.get("checkedAt", 0))
+        result.append({
+            "slot": number,
+            "online": entry.get("online") if isinstance(entry.get("online"), bool) else None,
+            "micEnabled": entry.get("micEnabled") if isinstance(entry.get("micEnabled"), bool) else None,
+            "checkedAt": checked_at,
+            "stale": checked_at <= 0 or now - checked_at > GUEST_STATE_MAX_AGE,
+            "error": str(entry.get("error", ""))[:32],
+        })
+    return result
+
+
+def load_vdoapi():
+    path = Path(__file__).with_name("vdoapi.py")
+    spec = importlib.util.spec_from_file_location("omarchy_streamer_vdoapi", path)
+    if not spec or not spec.loader:
+        raise CollabError("could not load VDO.Ninja control adapter")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def probe_slot(slot: dict[str, Any]) -> dict[str, Any]:
+    adapter = load_vdoapi()
+    number = int(slot["slot"])
+    try:
+        adapter.probe(slot["controlId"])
+        return update_guest_state(number, online=True, error="")
+    except adapter.VdoApiTimeout:
+        return update_guest_state(number, online=False, mic_enabled=None, error="timeout")
+    except adapter.VdoApiError:
+        return update_guest_state(number, online=None, mic_enabled=None, error="connection")
+
+
+def refresh_guests() -> list[dict[str, Any]]:
+    session = require_session()
+    slots = list(session.get("slots", []))
+    if not slots:
+        return []
+    # Each managed page has its own private control capability. Probe in
+    # parallel so a four-slot refresh takes one timeout window, not four.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(slots))) as pool:
+        list(pool.map(probe_slot, slots))
+    return safe_guest_states(session)
+
+
+def set_guest_mic(raw: str, enabled: bool) -> dict[str, Any]:
+    session = require_session()
+    slot = get_slot(session, raw)
+    adapter = load_vdoapi()
+    try:
+        result = adapter.set_mic(slot["controlId"], enabled)
+    except adapter.VdoApiTimeout as exc:
+        update_guest_state(int(slot["slot"]), online=False, mic_enabled=None, error="timeout")
+        raise CollabError("guest page did not answer the microphone command") from exc
+    except adapter.VdoApiError as exc:
+        update_guest_state(int(slot["slot"]), online=None, mic_enabled=None, error="connection")
+        raise CollabError("guest control connection failed") from exc
+    mic_enabled = result if isinstance(result, bool) else None
+    state = update_guest_state(int(slot["slot"]), online=True, mic_enabled=mic_enabled, error="")
+    return {"slot": int(slot["slot"]), "online": True, "micEnabled": state["micEnabled"]}
+
+
+def disconnect_guest(raw: str) -> dict[str, Any]:
+    session = require_session()
+    slot = get_slot(session, raw)
+    adapter = load_vdoapi()
+    try:
+        adapter.hangup(slot["controlId"])
+    except adapter.VdoApiTimeout as exc:
+        raise CollabError("guest page did not answer the disconnect command") from exc
+    except adapter.VdoApiError as exc:
+        raise CollabError("guest control connection failed") from exc
+    update_guest_state(int(slot["slot"]), online=False, mic_enabled=None, error="")
+    return {"slot": int(slot["slot"]), "online": False, "micEnabled": None}
+
+
 def rotate_slot(raw: str) -> int:
     session = require_session()
     old = get_slot(session, raw)
     number = int(old["slot"])
     session["slots"] = [new_slot(number) if int(slot["slot"]) == number else slot for slot in session["slots"]]
     save_session(session)
+    clear_guest_state(number)
     return number
 
 
@@ -213,6 +374,7 @@ def reset_session() -> None:
         SESSION_FILE.unlink()
     except FileNotFoundError:
         pass
+    clear_guest_state()
 
 
 def load_obsbrowser():
@@ -259,7 +421,9 @@ def status() -> dict[str, Any]:
         "inviteReady": session is not None,
         "programUrlReady": session is not None,
         "managedSlotsReady": bool(slots),
+        "guestControlReady": bool(slots),
         "slotCount": len(slots),
+        "guests": safe_guest_states(session),
         "obsSceneName": DEFAULT_OBS_SCENE,
         "credentialsExposed": False,
         "error": error,
@@ -297,6 +461,14 @@ def perform(action: str, value: str = "") -> dict[str, Any]:
     elif action == "collab.obs-add-slot":
         details.update(add_program_to_obs(value))
         details["slot"] = int(value)
+    elif action == "collab.guest-refresh":
+        details["guests"] = refresh_guests()
+    elif action == "collab.guest-mute":
+        details.update(set_guest_mic(value, False))
+    elif action == "collab.guest-unmute":
+        details.update(set_guest_mic(value, True))
+    elif action == "collab.guest-disconnect":
+        details.update(disconnect_guest(value))
     else:
         raise CollabError(f"unsupported collaboration action: {action}")
     return {"ok": True, "action": action, "provider": PROVIDER_ID, **details}
