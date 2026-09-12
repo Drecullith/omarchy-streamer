@@ -21,20 +21,16 @@ Item {
     if (payload) {
       try { args = JSON.parse(payload) || {} } catch (e) { args = {} }
     }
-    firstRun = String(args.mode || "tour") === "first-run"
-    step = 0
+    var mode = String(args.mode || "tour")
+    firstRun = mode === "first-run"
+    step = mode === "preflight" ? 1 : 0
     opened = true
     refreshPreflight()
     Qt.callLater(function() { keyHandler.forceActiveFocus() })
   }
 
-  function close() {
-    opened = false
-  }
-
-  function refreshPreflight() {
-    if (!statusProc.running) statusProc.running = true
-  }
+  function close() { opened = false }
+  function refreshPreflight() { if (!statusProc.running) statusProc.running = true }
 
   function finish() {
     if (firstRun) {
@@ -44,18 +40,9 @@ Item {
     }
   }
 
-  function skip() {
-    if (!completeProc.running) completeProc.running = true
-  }
-
-  function next() {
-    if (step < stepCount - 1) step += 1
-    else finish()
-  }
-
-  function previous() {
-    if (step > 0) step -= 1
-  }
+  function skip() { if (!completeProc.running) completeProc.running = true }
+  function next() { if (step < stepCount - 1) step += 1; else finish() }
+  function previous() { if (step > 0) step -= 1 }
 
   function titleForStep() {
     var titles = [
@@ -143,15 +130,8 @@ Item {
     WlrLayershell.keyboardFocus: root.opened ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
     exclusionMode: ExclusionMode.Ignore
 
-    Rectangle {
-      anchors.fill: parent
-      color: Qt.rgba(0, 0, 0, 0.72)
-    }
-
-    MouseArea {
-      anchors.fill: parent
-      onClicked: if (!root.firstRun) root.close()
-    }
+    Rectangle { anchors.fill: parent; color: Qt.rgba(0, 0, 0, 0.72) }
+    MouseArea { anchors.fill: parent; onClicked: if (!root.firstRun) root.close() }
 
     Rectangle {
       id: card
@@ -256,7 +236,7 @@ Item {
           }
         }
 
-        Item { width: 1; height: Math.max(0, parent.height - parent.implicitHeight - Style.space(78)) }
+        Item { width: 1; height: root.step === 1 ? Style.space(18) : Style.space(120) }
 
         Text {
           width: parent.width
@@ -284,7 +264,10 @@ Item {
             onClicked: root.previous()
           }
 
-          Item { width: parent.width - Style.space(324); height: 1 }
+          Item {
+            width: parent.width - (root.firstRun ? Style.space(432) : Style.space(324))
+            height: 1
+          }
 
           StreamerButton {
             visible: root.firstRun
