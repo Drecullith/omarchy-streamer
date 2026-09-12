@@ -54,6 +54,13 @@ BarWidget {
   property string collaborationError: ""
   property int selectedGuestSlot: 1
 
+  property bool profileReady: false
+  property string activeProfile: "gaming"
+  property string activeProfileLabel: "Gaming"
+  property int profileGuestRefreshSeconds: 30
+  property string profileGuestLayout: "auto"
+  property string profileError: ""
+
   property string dndState: "unknown"
   property string actionMessage: ""
 
@@ -85,6 +92,7 @@ BarWidget {
       var audio = state.audio || {}
       var safety = state.safety || {}
       var collab = state.collaboration || {}
+      var profiles = state.profiles || {}
 
       root.active = !!state.active
       root.privacy = !!state.privacy
@@ -128,6 +136,13 @@ BarWidget {
       root.collaborationError = String(collab.error || "")
       if (root.collaborationSlotCount > 0 && root.selectedGuestSlot > root.collaborationSlotCount) root.selectedGuestSlot = root.collaborationSlotCount
 
+      root.profileReady = !!profiles.ready
+      root.activeProfile = String(profiles.active || "gaming")
+      root.activeProfileLabel = String(profiles.activeLabel || "Gaming")
+      root.profileGuestRefreshSeconds = Number(profiles.guestRefreshSeconds || 30)
+      root.profileGuestLayout = String(profiles.guestLayout || "auto")
+      root.profileError = String(profiles.error || "")
+
       root.dndState = String(state.dndState || "unknown")
       if (!sceneField.activeFocus && root.currentScene !== "") sceneField.text = root.currentScene
     } catch (e) {}
@@ -158,6 +173,11 @@ BarWidget {
         case "collab.guest-mute": root.actionMessage = "Guest " + data.slot + " microphone muted"; return
         case "collab.guest-unmute": root.actionMessage = "Guest " + data.slot + " microphone unmuted"; return
         case "collab.guest-disconnect": root.actionMessage = "Guest " + data.slot + " disconnected"; return
+        case "collab.layout": root.actionMessage = "Guest layout applied: " + String(data.preset || "auto"); return
+        case "profile.apply":
+        case "profile.next":
+        case "profile.previous": root.actionMessage = "Profile: " + String(data.label || data.profile || "updated"); return
+        case "profile.layout": root.actionMessage = "Profile guest layout applied"; return
         case "onboarding.open": root.actionMessage = "Guide opened"; return
       }
     } catch (e) {}
@@ -288,6 +308,22 @@ BarWidget {
         StreamerButton { width: (parent.width-parent.spacing)*0.32; fontFamily: root.bar.fontFamily; label: "Guide"; onClicked: root.runAction("onboarding.open", "tour") }
       }
 
+      Text { width: parent.width; text: "Production Profile"; color: Color.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
+      Text {
+        width: parent.width
+        text: root.profileReady ? (root.activeProfileLabel + " · guest refresh " + root.profileGuestRefreshSeconds + "s · layout " + root.profileGuestLayout) : ("Profiles unavailable" + (root.profileError ? ": " + root.profileError : ""))
+        color: root.profileReady ? Color.foreground : Color.urgent
+        font.family: root.bar.fontFamily
+        font.pixelSize: Style.font.bodySmall
+        wrapMode: Text.Wrap
+      }
+      Row {
+        width: parent.width; spacing: Style.space(8)
+        StreamerButton { width: (parent.width-parent.spacing)/2; fontFamily: root.bar.fontFamily; label: "← Profile"; available: root.profileReady; onClicked: root.runAction("profile.previous") }
+        StreamerButton { width: (parent.width-parent.spacing)/2; fontFamily: root.bar.fontFamily; label: "Profile →"; available: root.profileReady; onClicked: root.runAction("profile.next") }
+      }
+      StreamerButton { width: parent.width; fontFamily: root.bar.fontFamily; label: "Apply Profile Guest Layout"; available: root.profileReady && root.collaborationActive && root.obsWebSocketReady; onClicked: root.runAction("profile.layout") }
+
       Text { width: parent.width; text: "Emergency"; color: Color.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
       Row {
         width: parent.width; spacing: Style.space(8)
@@ -416,6 +452,13 @@ BarWidget {
       Row {
         visible: root.collaborationActive && root.collaborationManagedSlotsReady
         width: parent.width; spacing: Style.space(8)
+        StreamerButton { width: (parent.width-parent.spacing)/2; fontFamily: root.bar.fontFamily; label: "Auto Guest Layout"; available: root.obsWebSocketReady; onClicked: root.runAction("collab.layout", "auto") }
+        StreamerButton { width: (parent.width-parent.spacing)/2; fontFamily: root.bar.fontFamily; label: "Focus Guest " + root.selectedGuestSlot; available: root.obsWebSocketReady; onClicked: root.runAction("collab.layout", "focus:" + root.selectedGuestSlot) }
+      }
+
+      Row {
+        visible: root.collaborationActive && root.collaborationManagedSlotsReady
+        width: parent.width; spacing: Style.space(8)
         StreamerButton { width: (parent.width-parent.spacing)/2; fontFamily: root.bar.fontFamily; label: "Copy Guest Invite"; available: root.collaborationClipboardReady; onClicked: root.runAction("collab.copy-slot-invite", root.selectedGuestSlot) }
         StreamerButton { width: (parent.width-parent.spacing)/2; fontFamily: root.bar.fontFamily; label: "Add Guest to OBS"; available: root.obsWebSocketReady; onClicked: root.runAction("collab.obs-add-slot", root.selectedGuestSlot) }
       }
@@ -441,7 +484,7 @@ BarWidget {
       }
       Text {
         width: parent.width
-        text: "Guest presence requires a callback from that guest page and becomes stale after 30 seconds. Private room, stream and page-control IDs never appear in status."
+        text: "Guest presence requires a callback from that guest page and becomes stale after 30 seconds. Layout helpers only touch managed Omarchy Streamer guest scene items."
         color: Qt.darker(Color.foreground,1.25)
         font.family: root.bar.fontFamily
         font.pixelSize: Style.font.caption
@@ -498,7 +541,7 @@ BarWidget {
 
       Text { visible: root.obsRunning && !root.obsWebSocketReady && root.obsWebSocketError !== ""; width: parent.width; text: "OBS control: " + root.obsWebSocketError; color: Color.urgent; font.family: root.bar.fontFamily; font.pixelSize: Style.font.caption; wrapMode: Text.Wrap }
       Text { visible: root.actionMessage !== ""; width: parent.width; text: root.actionMessage; color: root.actionMessage.indexOf("error:") === 0 ? Color.urgent : Color.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.caption; wrapMode: Text.Wrap }
-      Text { width: parent.width; text: "v0.8 Guest Control · callback presence · remote mic · disconnect"; color: Qt.darker(Color.foreground,1.35); font.family: root.bar.fontFamily; font.pixelSize: Style.font.caption; wrapMode: Text.Wrap }
+      Text { width: parent.width; text: "v0.9 Profiles + Guest Layouts · hardware-safe routing boundary"; color: Qt.darker(Color.foreground,1.35); font.family: root.bar.fontFamily; font.pixelSize: Style.font.caption; wrapMode: Text.Wrap }
     }
   }
 
