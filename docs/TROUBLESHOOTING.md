@@ -1,34 +1,25 @@
 # Omarchy Streamer Troubleshooting
 
-This guide covers common v0.8 symptoms. Start with the plugin's own status before changing system configuration.
+This guide covers common **v0.9** symptoms. Start with Streamer's own status before changing system configuration.
 
 ```bash
 bash ~/.config/omarchy/plugins/io.github.drecullith.streamer/bin/streamerctl status | python3 -m json.tool
 ```
 
-If your plugin directory differs, run the same `bin/streamerctl status` from the installed plugin root.
+If your plugin directory differs, run `bin/streamerctl status` from the installed plugin root.
 
-## The Stream widget is missing
-
-Check that the plugin is installed and enabled:
+## Stream widget missing
 
 ```bash
 omarchy plugin enable io.github.drecullith.streamer
 ```
 
-If the shell was already running during an unusual install/update state, reload/restart the Omarchy shell using the normal Omarchy workflow and check again.
+If the shell was already running during an unusual install/update state, reload/restart the Omarchy shell using the normal Omarchy workflow.
 
-## The first-run guide did not appear
-
-Open it manually:
+## First-run guide did not appear
 
 ```bash
 omarchy-shell io.github.drecullith.streamer action onboarding.open tour
-```
-
-Check onboarding state:
-
-```bash
 python3 bin/onboardingctl.py status | python3 -m json.tool
 ```
 
@@ -38,11 +29,115 @@ To deliberately re-enable first-run eligibility:
 omarchy-shell io.github.drecullith.streamer action onboarding.reset ""
 ```
 
-The service intentionally attempts the automatic first-run summon only once per shell session.
+The automatic first-run summon is attempted once per shell session.
+
+## Production profile looks wrong
+
+Inspect profile state:
+
+```bash
+python3 bin/profilectl.py status | python3 -m json.tool
+```
+
+Select explicitly if needed:
+
+```bash
+omarchy-shell io.github.drecullith.streamer action profile.apply gaming
+omarchy-shell io.github.drecullith.streamer action profile.apply recording
+omarchy-shell io.github.drecullith.streamer action profile.apply podcast
+omarchy-shell io.github.drecullith.streamer action profile.apply low-spec
+```
+
+Profile selection does not start/stop capture and does not automatically rearrange OBS.
+
+## Guest refresh cadence did not change with profile
+
+The current intended values are:
+
+```text
+Gaming    30s
+Recording 30s
+Podcast   15s
+Low-spec  60s
+```
+
+Confirm `profiles.guestRefreshSeconds` in:
+
+```bash
+bash bin/streamerctl status | python3 -m json.tool
+```
+
+The long-running service consumes that value for the managed guest refresh timer. The change affects future timer firings; it does not force a network refresh every time you click a profile.
+
+## Apply Profile Guest Layout fails
+
+First confirm:
+
+- OBS is running,
+- OBS WebSocket is connected,
+- managed individual guest Browser Sources have been added to the `Omarchy Guests` scene.
+
+Then inspect the active profile:
+
+```bash
+python3 bin/profilectl.py status | python3 -m json.tool
+```
+
+`profile.layout` simply resolves that profile's recommended layout and passes it to the guest layout controller.
+
+## Auto Guest Layout says no managed guest sources exist
+
+The layout engine does not create guest sources. Add guests to OBS first.
+
+Expected managed names:
+
+```text
+Omarchy Streamer - Guest 1
+Omarchy Streamer - Guest 2
+Omarchy Streamer - Guest 3
+Omarchy Streamer - Guest 4
+```
+
+The group source `Omarchy Streamer - Guests` is not used by the individual layout engine.
+
+## Focus Guest N fails
+
+`focus:N` requires `Omarchy Streamer - Guest N` to exist as a scene item in the configured collaboration scene.
+
+Try:
+
+```bash
+omarchy-shell io.github.drecullith.streamer action collab.layout focus:1
+```
+
+If Guest 1 was never added to the scene, add it first with **Add Guest to OBS**.
+
+## Layout changed only guest sources, not my gameplay/logo/alerts
+
+That is intentional. v0.9's layout engine filters by the reserved `Omarchy Streamer - Guest N` naming pattern and ignores unrelated scene items.
+
+If an unrelated source is ever moved/disabled by a guest-layout action, treat that as a bug.
+
+## Single layout hid other guests
+
+That is intentional. `single` shows only the first managed guest and disables other managed guest scene items.
+
+Apply `auto`, `split`, `grid`, or an appropriate `focus:N` layout to bring managed guest items back into the active layout.
+
+## Layout geometry looks wrong
+
+Streamer queries OBS `GetVideoSettings` and uses the current base canvas dimensions.
+
+If the live result still looks wrong:
+
+1. verify OBS base canvas settings,
+2. confirm the managed sources are standard Browser Sources created by Streamer,
+3. try `auto` or `grid`,
+4. inspect the scene directly in OBS before going live.
+
+The transform path is unit-tested, but visual composition still needs the real-machine validation pass.
 
 ## OBS says missing
-
-Check whether the `obs` executable is on PATH:
 
 ```bash
 command -v obs
@@ -50,176 +145,129 @@ command -v obs
 
 Streamer does not install OBS automatically.
 
-## OBS is running but WebSocket is unavailable
-
-Check the Streamer status:
+## OBS running but WebSocket unavailable
 
 ```bash
 python3 bin/obsws.py status | python3 -m json.tool
 ```
 
-Confirm OBS WebSocket is enabled and password authentication remains configured in OBS. Streamer normally reads OBS's local obs-websocket config and connects to localhost.
+Keep OBS WebSocket authentication enabled. Streamer normally reads OBS's local WebSocket config and connects to localhost. The default port is 4455 unless OBS is configured differently.
 
-The default port is 4455 unless OBS is configured differently.
+## OBS authentication error
 
-Do not disable authentication merely to make Streamer connect.
+Streamer uses OBS's configured WebSocket password. If OBS configuration changed while running, reload/restart the relevant app state and retry.
 
-## OBS control reports an authentication error
-
-Streamer uses OBS's configured WebSocket password. If OBS's configuration was changed while OBS/Streamer was running, restart or reload the relevant application state and check again.
-
-The plugin does not store the OBS password in the repository or its normal state directory.
+The password is not stored in the repository or Streamer's normal state directory.
 
 ## Start Stream fails
 
-Open OBS and verify that the streaming service/output settings work directly in OBS first. Streamer asks OBS to start the configured stream; it does not create provider credentials or stream keys.
+Verify the streaming output works directly in OBS first. Streamer asks OBS to start the already-configured stream; it does not create provider credentials or stream keys.
 
 ## Save Clip fails
 
-The replay buffer must be running.
-
-Use **Start Replay Buffer** first. If that fails, verify replay-buffer settings in OBS.
+Replay buffer must be running. Start it first and verify OBS replay-buffer settings if that fails.
 
 ## Scene switching fails
 
-Use the exact OBS scene name. Scene matching is not fuzzy.
-
-Check current OBS status:
+Use the exact OBS scene name.
 
 ```bash
 python3 bin/obsws.py status | python3 -m json.tool
 ```
 
-## PipeWire is not detected
-
-Check:
+## PipeWire not detected
 
 ```bash
 pgrep -x pipewire
 command -v wpctl
 ```
 
-Audio Desk requires WirePlumber's `wpctl` interface.
+Audio Desk requires WirePlumber `wpctl`.
 
-## No microphone appears
-
-Inspect the Audio Desk status:
+## No microphone appears / selected mic says MISSING
 
 ```bash
 python3 bin/audioctl.py status | python3 -m json.tool
 ```
 
-Reconnect the device if necessary, then refresh the panel. Bluetooth/USB devices can receive new PipeWire numeric IDs after reconnecting; Streamer resolves the remembered node name again rather than trusting an old ID.
+Reconnect the device if needed, then deliberately select an available mic. Streamer will not silently substitute another input.
 
-## The selected microphone says MISSING
-
-Streamer will not silently substitute another microphone.
-
-Use **Next Mic / Select Mic** to deliberately choose an available source.
-
-## Microphone mute/volume controls fail
-
-Confirm `wpctl` is present and the selected source is still available:
+## Mic mute/volume controls fail
 
 ```bash
 command -v wpctl
 python3 bin/audioctl.py status | python3 -m json.tool
 ```
 
+Confirm the selected source is still present.
+
+## Why can't I route each remote guest separately yet?
+
+That is intentionally withheld in v0.9.
+
+WirePlumber can inspect/control individual streams, but Streamer has not yet proven a stable mapping between a specific remote browser guest and a specific local PipeWire stream node on the actual Omarchy machine.
+
+Guessing could mute or reroute the wrong application. The first hardware collaboration session will inspect the real PipeWire topology before any per-guest routing feature is enabled.
+
 ## Privacy will not turn on
-
-Privacy depends on Omarchy notification DND being reachable.
-
-Check:
 
 ```bash
 omarchy-shell notifications dndState
 ```
 
-Expected output is `on` or `off`.
-
-If the state is unavailable/unknown, Streamer deliberately does not claim Privacy is enabled.
+Expected output is `on` or `off`. If it is unknown/unavailable, Streamer deliberately does not claim Privacy is active.
 
 ## Privacy changed my notification setting
 
-When Streamer enables Privacy, it records the previous DND state and restores it when Privacy/Streamer Mode is disabled.
-
-If a shell crash or manual file manipulation interrupted that lifecycle, inspect:
-
-```text
-~/.local/state/omarchy-streamer/
-```
+Streamer records the previous DND state and restores it when Privacy/Streamer Mode is disabled.
 
 Do not delete state files while Streamer Mode is active unless you understand the restoration consequence.
 
-## Stream-Safe is unavailable
-
-Check Hyprland control:
+## Stream-Safe unavailable
 
 ```bash
 command -v hyprctl
 hyprctl activeworkspace -j
-```
-
-Then query:
-
-```bash
 python3 bin/safetyctl.py status | python3 -m json.tool
 ```
 
-## Stream-Safe did not move my windows
+## Stream-Safe did not move windows
 
-That is intentional. Stream-Safe switches to a dedicated workspace but does not automatically move, hide, close, or kill existing windows.
+Intentional. It switches workspace but does not auto-move/hide/close/kill windows.
 
-## I received a sensitive-window warning
+## Sensitive-window warning
 
-The warning is advisory. Streamer will not manipulate the matched application.
-
-Review default rules in:
-
-```text
-config/sensitive-apps.txt
-```
-
-Personal rules can be placed in:
+Advisory only. Personal rules live in:
 
 ```text
 ~/.config/omarchy-streamer/sensitive-apps.txt
 ```
 
-## Collaboration says `wl-copy` missing
+## `wl-copy` missing
 
-`wl-copy` is needed only for copying guest/source links through the panel.
-
-Check:
+Needed only for copying collaboration links through the panel:
 
 ```bash
 command -v wl-copy
 ```
 
-Streamer will report the missing helper instead of silently installing it.
-
-## Open Director is unavailable
-
-Check:
+## Open Director unavailable
 
 ```bash
 command -v xdg-open
 ```
 
-The browser director launch uses `xdg-open`.
+## Guest invite stopped working after rotation
 
-## A guest invite stopped working after rotation
-
-That is expected. **Rotate Guest Link** invalidates that managed slot's old private identities. **Rotate Room** replaces the room and all managed guest identities.
+Expected. **Rotate Guest Link** invalidates that slot's old identities; **Rotate Room** replaces all room/slot credentials.
 
 Send the newly copied invite.
 
 ## Add Guest to OBS fails
 
-First confirm OBS WebSocket is connected.
+Confirm OBS WebSocket is connected.
 
-Streamer manages these reserved names:
+Streamer reserves:
 
 ```text
 Omarchy Streamer - Guests
@@ -229,147 +277,82 @@ Omarchy Streamer - Guest 3
 Omarchy Streamer - Guest 4
 ```
 
-If a reserved name already belongs to a non-Browser Source, Streamer refuses to replace it. Rename/remove the conflicting source yourself if it is safe to do so.
+If a reserved name already belongs to a non-Browser Source, Streamer refuses to replace it.
 
-## A guest shows STATUS UNKNOWN
+## Guest shows STATUS UNKNOWN
 
-This means Streamer does not yet have a usable callback-backed state for that slot.
-
-Try **Refresh Guests**, or from IPC:
+No usable callback-backed state exists yet.
 
 ```bash
 omarchy-shell io.github.drecullith.streamer action collab.guest-refresh ""
-```
-
-Then inspect only the safe guest-state fields:
-
-```bash
 python3 bin/collabctl.py status | python3 -m json.tool
 ```
 
-`STATUS UNKNOWN` is preferable to inventing an online/offline result when there is no evidence either way.
+UNKNOWN is preferable to inventing online/offline state.
 
-## A guest shows CONTROL UNAVAILABLE
+## Guest shows CONTROL UNAVAILABLE
 
-The provider page-control connection itself failed. Streamer deliberately treats this differently from OFFLINE because it could not reach the control path well enough to ask the guest page.
+The provider control connection itself failed. This is not treated as OFFLINE because Streamer could not reach the control path well enough to ask the guest page.
 
-Check general network/DNS/TLS connectivity and then use **Refresh Guests** again. Do not rotate room credentials merely because the provider control endpoint is temporarily unreachable.
+Check network/DNS/TLS and refresh again. Do not rotate room credentials merely because the provider endpoint is temporarily unreachable.
 
-For debugging only, the provider-control endpoint can be overridden with:
+## Guest shows OFFLINE but appears joined
 
-```text
-OMARCHY_STREAMER_VDO_API_URL
-```
+OFFLINE means the managed guest page did not answer `getDetails` within the timeout.
 
-Leave the default endpoint in normal use.
+Check:
 
-## A guest shows OFFLINE even though I think they joined
+- current (not rotated) invite was used,
+- correct managed slot,
+- guest page still open,
+- browser did not suspend/kill the page,
+- network path healthy.
 
-OFFLINE means the managed guest page did not answer Streamer's correlated `getDetails` callback within the configured timeout.
+Then refresh.
 
-Check all of the following:
+## Guest says ONLINE · STALE
 
-- the guest used the current managed-slot invite, not an older rotated link,
-- the correct Guest 1-4 slot is selected,
-- the guest page is still open,
-- the browser did not suspend/kill the page,
-- the network path is healthy.
+Last callback-backed state is older than the freshness window (30s by default). Refresh guests. If refresh keeps failing, state should move toward OFFLINE/CONTROL UNAVAILABLE rather than appearing fresh forever.
 
-Then use **Refresh Guests**.
+## Mute/Unmute Guest fails
 
-The default control timeout is short by design. It can be adjusted for diagnosis with:
+Remote mic control only succeeds after the managed page returns the correlated command callback.
 
-```text
-OMARCHY_STREAMER_VDO_API_TIMEOUT
-```
+Verify selected guest ONLINE, refresh once, retry, and use the provider Director as fallback if immediate manual intervention is needed.
 
-Do not treat a longer timeout as a fix for a consistently unresponsive guest page.
-
-## A guest says ONLINE · STALE
-
-The last callback-backed state is older than the freshness window. The default stale threshold is 30 seconds.
-
-Use **Refresh Guests**. If repeated refreshes fail, the next status should move toward OFFLINE or CONTROL UNAVAILABLE rather than retaining an apparently fresh ONLINE result forever.
-
-The threshold can be overridden with:
-
-```text
-OMARCHY_STREAMER_GUEST_STATE_MAX_AGE
-```
-
-## Mute Guest / Unmute Guest fails
-
-Remote guest microphone control only succeeds after the managed guest page returns the correlated command callback.
-
-If it fails:
-
-1. verify the selected guest is ONLINE,
-2. use **Refresh Guests**,
-3. retry the command once the page is responsive,
-4. use the provider Director as the fallback control surface if immediate manual intervention is needed.
-
-Streamer does not change the displayed remote mic state merely because it successfully sent a WebSocket message.
+Streamer does not change displayed remote mic state merely because a WebSocket send succeeded.
 
 ## Disconnect Guest fails
 
-Streamer marks a managed guest OFFLINE only after the guest page acknowledges the disconnect command.
+Streamer marks the slot OFFLINE only after the page acknowledges disconnect.
 
-If the command times out or the control connection fails, Streamer returns an error instead of pretending removal succeeded.
+If it times out/fails, use **Open Director** for immediate provider-side management and rotate the guest link afterward if old access should be invalidated.
 
-Use **Open Director** if the guest must be managed immediately, and rotate that guest link afterward if the old invite should no longer remain current.
+## Guest state wrong after rotation
 
-## Guest state looks wrong after Rotate Guest Link or Rotate Room
+Rotation clears cached state for the replaced identity. New state starts UNKNOWN until the new managed page answers.
 
-Rotation clears the cached state associated with the replaced identity. The new slot/room should return to UNKNOWN until the new guest page answers a callback.
-
-If old state appears to survive a legitimate current release, inspect:
+The cache is:
 
 ```text
 ~/.local/state/omarchy-streamer/collab-guest-state.json
 ```
 
-Do not publish that state directory wholesale in a bug report because the neighboring collaboration session file contains private room capabilities.
+Do not publish the whole state directory; the neighboring collaboration session file contains private capabilities.
 
-## Guest status exposes a room password or private ID
+## Generic status exposes collaboration secrets
 
 Treat that as a security bug.
 
-Generic collaboration status may include safe fields such as slot number, online/mic state, timestamp, stale flag and short error code. It must not contain:
+Normal status must not contain room/password, `streamId`, `controlId`, or secret invite/director/source URLs. CI checks this boundary.
 
-- room/password,
-- managed `streamId`,
-- private `controlId`,
-- invite/director/source URLs.
+## Emergency button reports partial success
 
-CI explicitly checks this boundary.
-
-## The emergency button reports partial success
-
-Emergency actions are best-effort by design. They attempt each safety step independently.
-
-After using an emergency action, verify OBS capture state directly if the OBS connection itself was unavailable.
-
-## Reset only onboarding
-
-```bash
-omarchy-shell io.github.drecullith.streamer action onboarding.reset ""
-```
-
-This does not reset OBS, Audio Desk, collaboration rooms, Stream-Safe configuration, or Streamer Mode.
-
-## Clear only collaboration credentials
-
-Use **Clear Room** in the panel or:
-
-```bash
-omarchy-shell io.github.drecullith.streamer action collab.reset ""
-```
-
-This removes the locally stored collaboration session and cached managed guest state.
+Emergency actions are best-effort. Verify OBS directly if the OBS connection itself was unavailable.
 
 ## Diagnostic commands
 
-General state:
+General:
 
 ```bash
 bash bin/streamerctl doctor | python3 -m json.tool
@@ -379,6 +362,12 @@ OBS:
 
 ```bash
 python3 bin/obsws.py status | python3 -m json.tool
+```
+
+Profiles:
+
+```bash
+python3 bin/profilectl.py status | python3 -m json.tool
 ```
 
 Audio:
@@ -393,13 +382,13 @@ Stream-Safe:
 python3 bin/safetyctl.py status | python3 -m json.tool
 ```
 
-Collaboration and safe managed guest state:
+Collaboration:
 
 ```bash
 python3 bin/collabctl.py status | python3 -m json.tool
 ```
 
-Force a guest-state refresh:
+Force guest refresh:
 
 ```bash
 python3 bin/collabctl.py action collab.guest-refresh | python3 -m json.tool
@@ -419,8 +408,8 @@ Include:
 - Omarchy/Quattro revision if known
 - whether OBS is running
 - whether PipeWire/WirePlumber are running
-- whether the problem is local audio, OBS, Stream-Safe, or managed guest control
-- the failing action name
-- sanitized error/status output
+- selected production profile
+- failing action name
+- sanitized status/error output
 
 Do **not** post collaboration invite URLs, room passwords, managed stream/control IDs, OBS WebSocket passwords, stream keys, or other credentials in public bug reports.
