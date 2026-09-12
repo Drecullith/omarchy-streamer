@@ -2,11 +2,11 @@
 
 An all-in-one Streamer Mode for **Omarchy Quattro**.
 
-Omarchy Streamer turns an Omarchy desktop into a deliberate creator/streaming workspace with OBS control, PipeWire-aware audio controls, reversible privacy protection, stream-safe workspace tools, emergency actions, and a stable local action surface for future integrations.
+Omarchy Streamer turns an Omarchy desktop into a deliberate creator/streaming workspace with OBS control, PipeWire-aware audio controls, reversible privacy protection, stream-safe workspace tools, browser collaboration, emergency actions, and a stable local action surface for future integrations.
 
-> Status: early **v0.4**. Core lifecycle, authenticated OBS control, Audio Desk, Stream-Safe workspace controls, sensitive-window warnings, emergency actions, health state, bar UI, IPC, and CI coverage are in place. Real Omarchy/OBS/PipeWire hardware validation is still required.
+> Status: early **v0.5**. Core lifecycle, authenticated OBS control, Audio Desk, Stream-Safe workspace controls, browser collaboration rooms, sensitive-window warnings, emergency actions, health state, bar UI, IPC, and CI coverage are in place. Real Omarchy/OBS/PipeWire/Hyprland hardware validation is still required.
 
-## Current v0.4
+## Current v0.5
 
 - Omarchy Quattro third-party plugin
 - bar widget + popup control panel
@@ -22,15 +22,19 @@ Omarchy Streamer turns an Omarchy desktop into a deliberate creator/streaming wo
 - dedicated named **Stream-Safe** Hyprland workspace
 - remembers and restores the workspace you came from
 - warning-only sensitive-window guard
-- default warnings for common password/authenticator apps
-- user-extensible sensitive-app rules
-- emergency **End Live + Mute**
-- emergency **Stop All Capture**
+- emergency **End Live + Mute** and **Stop All Capture**
+- provider-based browser collaboration core
+- password-protected VDO.Ninja room workflow
+- explicit guest-invite copying
+- explicit clean group-scene URL copying for OBS Browser Source
+- local-only collaboration credential storage with restrictive file permissions
+- room rotation to invalidate previously shared links
+- no collaboration secrets in generic plugin status/IPC snapshots
 - no root requirement
 - no implicit `sudo`
 - no automatic package installation
 - no stream keys stored by the plugin
-- CI tests for manifest, contracts, OBS RPC, Audio Desk, and Stream-Safe behavior
+- CI tests for manifest, contracts, OBS RPC, Audio Desk, Stream-Safe, and collaboration behavior
 
 ## Install on Omarchy Quattro
 
@@ -48,6 +52,8 @@ Third-party Omarchy plugins are installed disabled so their code can be reviewed
 - Python 3 for the local controllers
 - PipeWire + WirePlumber `wpctl` for Audio Desk
 - Hyprland `hyprctl` for Stream-Safe workspace/window checks
+- `xdg-open` to launch a browser collaboration director
+- `wl-copy` to copy guest/program collaboration links from the panel
 
 Missing requirements are reported. Omarchy Streamer does not silently install them.
 
@@ -55,9 +61,45 @@ Missing requirements are reported. Omarchy Streamer does not silently install th
 
 Left-click **Stream** on the bar to open the panel. Right-click toggles Streamer Mode.
 
-The panel exposes Streamer Mode, stream/record/replay/clip/scene controls, Audio Desk, Stream-Safe workspace controls, privacy status, sensitive-window warnings, and emergency buttons.
+The panel exposes Streamer Mode, stream/record/replay/clip/scene controls, Collaboration, Audio Desk, Stream-Safe workspace controls, privacy status, sensitive-window warnings, and emergency buttons.
 
-### Emergency actions
+## Collaboration Core
+
+v0.5 adds a provider-based collaboration controller. The first provider is **VDO.Ninja**, which supports browser guests, director rooms, and scene links suitable for OBS Browser Sources.
+
+The workflow is deliberately explicit:
+
+1. **Create Room** creates a cryptographically random room ID and password locally.
+2. **Open Director** opens the password-bearing director link in the default browser.
+3. **Copy Guest Invite** copies a password-bearing browser invite to the Wayland clipboard.
+4. **Copy OBS Scene URL** copies a password-bearing `scene=0` group view with clean output for use as an OBS Browser Source.
+5. **Rotate Room** creates fresh credentials and invalidates previously copied links.
+6. **Clear Room** removes the local room credentials.
+
+The guest link grants access to the browser collaboration room only. It does **not** grant shell access, filesystem access, Streamer IPC access, OBS WebSocket access, or access to local Streamer state.
+
+Collaboration credentials are stored under the Streamer state directory with restrictive permissions. Normal `status` output intentionally exposes only safe metadata such as whether a room exists and whether browser/clipboard helpers are available. Room IDs, passwords, director URLs, invite URLs, and program URLs are excluded.
+
+The plugin itself does not run a collaboration server, open a listener, change firewall rules, or proxy guest media. Media transport is handled by the selected collaboration provider.
+
+### Collaboration actions
+
+```text
+collab.create
+collab.rotate
+collab.reset
+collab.open-director
+collab.copy-invite
+collab.copy-program
+```
+
+Actions that reveal or invalidate collaboration credentials are marked confirmation-required in the action contract.
+
+### Current collaboration boundary
+
+v0.5 creates and manages the room workflow but does **not** claim live guest presence, guest mute/remove control, or per-guest PipeWire routing yet. Those require a live provider/device integration and will be added only when they can be verified rather than simulated.
+
+## Emergency actions
 
 `emergency.end-live` performs a best-effort safety sequence:
 
@@ -140,6 +182,7 @@ omarchy-shell io.github.drecullith.streamer status
 omarchy-shell io.github.drecullith.streamer action stream.start ""
 omarchy-shell io.github.drecullith.streamer action mic.mute ""
 omarchy-shell io.github.drecullith.streamer action workspace.enter ""
+omarchy-shell io.github.drecullith.streamer action collab.create ""
 omarchy-shell io.github.drecullith.streamer action emergency.end-live ""
 ```
 
@@ -155,20 +198,22 @@ BarWidget.qml
 Service.qml ── IPC
       │
       └── bin/streamerctl
-             ├── bin/obsws.py     ── localhost OBS WebSocket v5
-             ├── bin/audioctl.py  ── WirePlumber/wpctl Audio Desk
-             └── bin/safetyctl.py ── Hyprland workspace/window safety
+             ├── bin/obsws.py      ── localhost OBS WebSocket v5
+             ├── bin/audioctl.py   ── WirePlumber/wpctl Audio Desk
+             ├── bin/safetyctl.py  ── Hyprland workspace/window safety
+             └── bin/collabctl.py  ── replaceable browser collaboration adapter
 ```
 
 ## Roadmap
 
-### v0.5 — Collaboration
+### v0.6 — Live collaboration controls
 
-- collaborator room workflow
-- browser guest integration
-- guest mute/remove and individual audio controls
-- deeper game/browser/collaborator PipeWire routing
-- later Mode700 integration
+- verified guest presence/status
+- guest mute/remove where the active provider safely supports it
+- optional one-click OBS Browser Source creation after real OBS validation
+- per-guest / game / browser audio routing
+- collaborator health and disconnect warnings
+- provider abstraction expansion, including later Mode700 integration
 
 ### Later — Stream profiles and integrations
 
@@ -179,7 +224,7 @@ Service.qml ── IPC
 
 ## Safety principles
 
-Omarchy Streamer does **not** silently install packages, use root, change firewall rules, store stream keys, silently substitute a missing selected microphone, auto-close sensitive apps, clear the clipboard, or hand external automation unrestricted shell execution.
+Omarchy Streamer does **not** silently install packages, use root, change firewall rules, store stream keys, silently substitute a missing selected microphone, auto-close sensitive apps, auto-clear the clipboard, expose collaboration secrets through generic status, run a guest-facing local server, or hand external automation unrestricted shell execution.
 
 Every integration should be observable, reversible where practical, and explicit about missing dependencies or failed protections.
 
