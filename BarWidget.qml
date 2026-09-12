@@ -36,7 +36,6 @@ BarWidget {
   property string workspaceName: ""
   property bool streamSafeActive: false
   property bool sensitiveActive: false
-  property string sensitiveRule: ""
   property string activeWindowClass: ""
   property string safetyError: ""
 
@@ -47,7 +46,11 @@ BarWidget {
   property bool collaborationBrowserReady: false
   property bool collaborationInviteReady: false
   property bool collaborationProgramUrlReady: false
+  property bool collaborationManagedSlotsReady: false
+  property int collaborationSlotCount: 0
+  property string collaborationObsSceneName: ""
   property string collaborationError: ""
+  property int selectedGuestSlot: 1
 
   property string dndState: "unknown"
   property string actionMessage: ""
@@ -96,7 +99,6 @@ BarWidget {
       root.workspaceName = String(safety.workspaceName || "")
       root.streamSafeActive = !!safety.streamSafeActive
       root.sensitiveActive = !!safety.sensitiveActive
-      root.sensitiveRule = String(safety.sensitiveRule || "")
       root.activeWindowClass = String(safety.activeWindowClass || "")
       root.safetyError = String(safety.error || "")
 
@@ -107,7 +109,11 @@ BarWidget {
       root.collaborationBrowserReady = !!collab.browserReady
       root.collaborationInviteReady = !!collab.inviteReady
       root.collaborationProgramUrlReady = !!collab.programUrlReady
+      root.collaborationManagedSlotsReady = !!collab.managedSlotsReady
+      root.collaborationSlotCount = Number(collab.slotCount || 0)
+      root.collaborationObsSceneName = String(collab.obsSceneName || "")
       root.collaborationError = String(collab.error || "")
+      if (root.collaborationSlotCount > 0 && root.selectedGuestSlot > root.collaborationSlotCount) root.selectedGuestSlot = root.collaborationSlotCount
 
       root.dndState = String(state.dndState || "unknown")
       if (!sceneField.activeFocus && root.currentScene !== "") sceneField.text = root.currentScene
@@ -125,17 +131,19 @@ BarWidget {
     try {
       var data = JSON.parse(text)
       var action = String(data.action || "")
-      if (action.indexOf("emergency.") === 0) {
-        root.actionMessage = "Emergency safety action applied"
-        return
-      }
+      if (action.indexOf("emergency.") === 0) { root.actionMessage = "Emergency safety action applied"; return }
       switch (action) {
         case "collab.create": root.actionMessage = "Collaboration room ready"; return
         case "collab.rotate": root.actionMessage = "Room rotated — old links are invalid"; return
         case "collab.reset": root.actionMessage = "Collaboration room cleared"; return
         case "collab.open-director": root.actionMessage = "Director opened in browser"; return
-        case "collab.copy-invite": root.actionMessage = "Guest invite copied"; return
-        case "collab.copy-program": root.actionMessage = "OBS group-scene URL copied"; return
+        case "collab.copy-invite": root.actionMessage = "Generic guest invite copied"; return
+        case "collab.copy-program": root.actionMessage = "Group OBS URL copied"; return
+        case "collab.copy-slot-invite": root.actionMessage = "Guest " + data.slot + " invite copied"; return
+        case "collab.copy-slot-source": root.actionMessage = "Guest " + data.slot + " OBS URL copied"; return
+        case "collab.slot-rotate": root.actionMessage = "Guest " + data.slot + " link rotated"; return
+        case "collab.obs-add-program": root.actionMessage = "Guest group added to OBS"; return
+        case "collab.obs-add-slot": root.actionMessage = "Guest " + data.slot + " added to OBS"; return
       }
     } catch (e) {}
     root.actionMessage = text
@@ -152,8 +160,15 @@ BarWidget {
 
   function setMicVolumeDelta(delta) {
     if (root.micVolumePercent === null || root.micVolumePercent === undefined) return
-    var next = Math.max(0, Math.min(150, Number(root.micVolumePercent) + delta))
-    root.runAction("mic.volume", Math.round(next))
+    root.runAction("mic.volume", Math.round(Math.max(0, Math.min(150, Number(root.micVolumePercent) + delta))))
+  }
+
+  function shiftGuest(delta) {
+    if (root.collaborationSlotCount < 1) return
+    var next = root.selectedGuestSlot + delta
+    if (next < 1) next = root.collaborationSlotCount
+    if (next > root.collaborationSlotCount) next = 1
+    root.selectedGuestSlot = next
   }
 
   function close() { root.popupOpen = false }
@@ -162,23 +177,14 @@ BarWidget {
     id: statusProc
     command: ["bash", root.helperPath, "status"]
     running: false
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: root.applyStatus(text)
-    }
+    stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.applyStatus(text) }
   }
 
   Process {
     id: actionProc
     running: false
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: root.feedback(text)
-    }
-    stderr: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: root.feedback(text)
-    }
+    stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.feedback(text) }
+    stderr: StdioCollector { waitForEnd: true; onStreamFinished: root.feedback(text) }
     onExited: function(exitCode) {
       if (exitCode === 0 && (root.actionMessage === "" || root.actionMessage === "Working…")) root.actionMessage = "Done"
       delayedRefresh.restart()
@@ -186,42 +192,21 @@ BarWidget {
     }
   }
 
-  Timer {
-    id: delayedRefresh
-    interval: 500
-    repeat: false
-    onTriggered: root.refreshStatus()
-  }
-
-  Timer {
-    id: feedbackTimer
-    interval: 3500
-    repeat: false
-    onTriggered: root.actionMessage = ""
-  }
-
-  Timer {
-    interval: 3000
-    repeat: true
-    running: true
-    onTriggered: root.refreshStatus()
-  }
+  Timer { id: delayedRefresh; interval: 500; repeat: false; onTriggered: root.refreshStatus() }
+  Timer { id: feedbackTimer; interval: 3500; repeat: false; onTriggered: root.actionMessage = "" }
+  Timer { interval: 3000; repeat: true; running: true; onTriggered: root.refreshStatus() }
 
   Row {
     id: statusRow
     anchors.centerIn: parent
     spacing: Style.space(6)
-
     Text {
       text: root.captureActive ? "●" : (root.active ? "●" : "○")
-      color: root.captureActive || root.privacyWarning || root.micWarning || root.safetyWarning
-             ? Color.urgent
-             : (root.active ? Color.accent : root.bar.barForeground)
+      color: root.captureActive || root.privacyWarning || root.micWarning || root.safetyWarning ? Color.urgent : (root.active ? Color.accent : root.bar.barForeground)
       font.family: root.bar.fontFamily
       font.pixelSize: Style.font.body
       anchors.verticalCenter: parent.verticalCenter
     }
-
     Text {
       visible: !root.bar.vertical
       text: root.barLabel
@@ -238,13 +223,8 @@ BarWidget {
     hoverEnabled: true
     cursorShape: Qt.PointingHandCursor
     acceptedButtons: Qt.LeftButton | Qt.RightButton
-
-    onClicked: function(mouse) {
-      if (mouse.button === Qt.RightButton) root.runAction("mode.toggle")
-      else root.popupOpen = !root.popupOpen
-    }
-
-    onEntered: if (root.bar) root.bar.showTooltip(root, root.live ? "LIVE — click for stream controls" : (root.rec ? "Recording — click for controls" : (root.sensitiveActive ? "Streamer Mode — sensitive window warning" : "Streamer Mode")))
+    onClicked: function(mouse) { if (mouse.button === Qt.RightButton) root.runAction("mode.toggle"); else root.popupOpen = !root.popupOpen }
+    onEntered: if (root.bar) root.bar.showTooltip(root, root.live ? "LIVE — click for stream controls" : (root.rec ? "Recording — click for controls" : "Streamer Mode"))
     onExited: if (root.bar) root.bar.hideTooltip(root)
   }
 
@@ -254,7 +234,7 @@ BarWidget {
     bar: root.bar
     owner: root
     open: root.popupOpen
-    contentWidth: popup.fittedContentWidth(Style.space(430))
+    contentWidth: popup.fittedContentWidth(Style.space(440))
     contentHeight: popup.fittedContentHeight(content.implicitHeight)
 
     Column {
@@ -283,110 +263,30 @@ BarWidget {
         wrapMode: Text.Wrap
       }
 
-      Text {
-        visible: root.privacyWarning
-        width: parent.width
-        text: "⚠ Capture is active while Streamer Privacy is OFF"
-        color: Color.urgent
-        font.family: root.bar.fontFamily
-        font.pixelSize: Style.font.body
-        font.bold: true
-        wrapMode: Text.Wrap
-      }
+      Text { visible: root.privacyWarning; width: parent.width; text: "⚠ Capture is active while Streamer Privacy is OFF"; color: Color.urgent; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body; font.bold: true; wrapMode: Text.Wrap }
+      Text { visible: root.safetyWarning; width: parent.width; text: "⚠ Sensitive window is active while capture is running" + (root.activeWindowClass ? " · " + root.activeWindowClass : ""); color: Color.urgent; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body; font.bold: true; wrapMode: Text.Wrap }
 
-      Text {
-        visible: root.safetyWarning
-        width: parent.width
-        text: "⚠ Sensitive window is active while capture is running" + (root.activeWindowClass ? " · " + root.activeWindowClass : "")
-        color: Color.urgent
-        font.family: root.bar.fontFamily
-        font.pixelSize: Style.font.body
-        font.bold: true
-        wrapMode: Text.Wrap
-      }
+      StreamerButton { width: parent.width; fontFamily: root.bar.fontFamily; label: root.active ? "Disable Streamer Mode" : "Enable Streamer Mode"; onClicked: root.runAction("mode.toggle") }
 
-      StreamerButton {
-        width: parent.width
-        fontFamily: root.bar.fontFamily
-        label: root.active ? "Disable Streamer Mode" : "Enable Streamer Mode"
-        onClicked: root.runAction("mode.toggle")
-      }
-
-      Text {
-        width: parent.width
-        text: "Emergency"
-        color: Color.foreground
-        font.family: root.bar.fontFamily
-        font.pixelSize: Style.font.subtitle
-        font.bold: true
+      Text { width: parent.width; text: "Emergency"; color: Color.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
+      Row {
+        width: parent.width; spacing: Style.space(8)
+        StreamerButton { width: (parent.width-parent.spacing)/2; fontFamily: root.bar.fontFamily; label: "End Live + Mute"; danger: true; emphasis: root.live; onClicked: root.runAction("emergency.end-live") }
+        StreamerButton { width: (parent.width-parent.spacing)/2; fontFamily: root.bar.fontFamily; label: "Stop All Capture"; danger: true; emphasis: root.captureActive || root.replaying; onClicked: root.runAction("emergency.stop-all") }
       }
 
       Row {
-        width: parent.width
-        spacing: Style.space(8)
-        StreamerButton {
-          width: (parent.width - parent.spacing) / 2
-          fontFamily: root.bar.fontFamily
-          label: "End Live + Mute"
-          danger: true
-          emphasis: root.live
-          onClicked: root.runAction("emergency.end-live")
-        }
-        StreamerButton {
-          width: (parent.width - parent.spacing) / 2
-          fontFamily: root.bar.fontFamily
-          label: "Stop All Capture"
-          danger: true
-          emphasis: root.captureActive || root.replaying
-          onClicked: root.runAction("emergency.stop-all")
-        }
+        width: parent.width; spacing: Style.space(8)
+        StreamerButton { width: (parent.width-parent.spacing)/2; fontFamily: root.bar.fontFamily; label: root.live ? "Stop Stream" : "Start Stream"; available: root.obsWebSocketReady; danger: root.live; emphasis: root.live; onClicked: root.runAction(root.live ? "stream.stop" : "stream.start") }
+        StreamerButton { width: (parent.width-parent.spacing)/2; fontFamily: root.bar.fontFamily; label: root.rec ? "Stop Recording" : "Start Recording"; available: root.obsWebSocketReady; danger: root.rec; emphasis: root.rec; onClicked: root.runAction(root.rec ? "record.stop" : "record.start") }
       }
-
       Row {
-        width: parent.width
-        spacing: Style.space(8)
-        StreamerButton {
-          width: (parent.width - parent.spacing) / 2
-          fontFamily: root.bar.fontFamily
-          label: root.live ? "Stop Stream" : "Start Stream"
-          available: root.obsWebSocketReady
-          danger: root.live
-          emphasis: root.live
-          onClicked: root.runAction(root.live ? "stream.stop" : "stream.start")
-        }
-        StreamerButton {
-          width: (parent.width - parent.spacing) / 2
-          fontFamily: root.bar.fontFamily
-          label: root.rec ? "Stop Recording" : "Start Recording"
-          available: root.obsWebSocketReady
-          danger: root.rec
-          emphasis: root.rec
-          onClicked: root.runAction(root.rec ? "record.stop" : "record.start")
-        }
+        width: parent.width; spacing: Style.space(8)
+        StreamerButton { width: (parent.width-parent.spacing)/2; fontFamily: root.bar.fontFamily; label: root.replaying ? "Stop Replay Buffer" : "Start Replay Buffer"; available: root.obsWebSocketReady; onClicked: root.runAction(root.replaying ? "replay.stop" : "replay.start") }
+        StreamerButton { width: (parent.width-parent.spacing)/2; fontFamily: root.bar.fontFamily; label: "Save Clip"; available: root.obsWebSocketReady && root.replaying; onClicked: root.runAction("clip.save") }
       }
-
       Row {
-        width: parent.width
-        spacing: Style.space(8)
-        StreamerButton {
-          width: (parent.width - parent.spacing) / 2
-          fontFamily: root.bar.fontFamily
-          label: root.replaying ? "Stop Replay Buffer" : "Start Replay Buffer"
-          available: root.obsWebSocketReady
-          onClicked: root.runAction(root.replaying ? "replay.stop" : "replay.start")
-        }
-        StreamerButton {
-          width: (parent.width - parent.spacing) / 2
-          fontFamily: root.bar.fontFamily
-          label: "Save Clip"
-          available: root.obsWebSocketReady && root.replaying
-          onClicked: root.runAction("clip.save")
-        }
-      }
-
-      Row {
-        width: parent.width
-        spacing: Style.space(8)
+        width: parent.width; spacing: Style.space(8)
         QQC.TextField {
           id: sceneField
           width: parent.width - sceneButton.width - parent.spacing
@@ -397,307 +297,152 @@ BarWidget {
           font.family: root.bar.fontFamily
           font.pixelSize: Style.font.body
           enabled: root.obsWebSocketReady
-          background: Rectangle {
-            radius: Style.cornerRadius
-            color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.07)
-            border.width: sceneField.activeFocus ? 1 : 0
-            border.color: Color.accent
-          }
+          background: Rectangle { radius: Style.cornerRadius; color: Qt.rgba(Color.foreground.r,Color.foreground.g,Color.foreground.b,0.07); border.width: sceneField.activeFocus ? 1 : 0; border.color: Color.accent }
           onAccepted: if (text.trim() !== "") root.runAction("scene.set", text.trim())
         }
-        StreamerButton {
-          id: sceneButton
-          width: Style.space(100)
-          fontFamily: root.bar.fontFamily
-          label: "Set Scene"
-          available: root.obsWebSocketReady && sceneField.text.trim() !== ""
-          onClicked: root.runAction("scene.set", sceneField.text.trim())
-        }
+        StreamerButton { id: sceneButton; width: Style.space(100); fontFamily: root.bar.fontFamily; label: "Set Scene"; available: root.obsWebSocketReady && sceneField.text.trim() !== ""; onClicked: root.runAction("scene.set", sceneField.text.trim()) }
       }
 
-      Rectangle { width: parent.width; height: Style.space(1); color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.16) }
+      Rectangle { width: parent.width; height: Style.space(1); color: Qt.rgba(Color.foreground.r,Color.foreground.g,Color.foreground.b,0.16) }
 
-      Text {
-        width: parent.width
-        text: "Collaboration"
-        color: Color.foreground
-        font.family: root.bar.fontFamily
-        font.pixelSize: Style.font.subtitle
-        font.bold: true
-      }
-
+      Text { width: parent.width; text: "Collaboration"; color: Color.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
       Text {
         width: parent.width
         text: root.collaborationActive
-              ? ((root.collaborationProviderLabel || "Browser guest") + " room ready · credentials stay local")
+              ? ((root.collaborationProviderLabel || "Browser guest") + " room ready · " + root.collaborationSlotCount + " managed guest slots")
               : "No guest room yet · create one when collaborators are joining"
         color: Color.foreground
         font.family: root.bar.fontFamily
         font.pixelSize: Style.font.bodySmall
         wrapMode: Text.Wrap
       }
-
       Row {
-        width: parent.width
-        spacing: Style.space(8)
-        StreamerButton {
-          width: (parent.width - parent.spacing) / 2
-          fontFamily: root.bar.fontFamily
-          label: root.collaborationActive ? "Room Ready" : "Create Room"
-          available: root.collaborationReady && !root.collaborationActive
-          onClicked: root.runAction("collab.create")
-        }
-        StreamerButton {
-          width: (parent.width - parent.spacing) / 2
-          fontFamily: root.bar.fontFamily
-          label: "Open Director"
-          available: root.collaborationActive && root.collaborationBrowserReady
-          onClicked: root.runAction("collab.open-director")
-        }
+        width: parent.width; spacing: Style.space(8)
+        StreamerButton { width: (parent.width-parent.spacing)/2; fontFamily: root.bar.fontFamily; label: root.collaborationActive ? "Room Ready" : "Create Room"; available: root.collaborationReady && !root.collaborationActive; onClicked: root.runAction("collab.create") }
+        StreamerButton { width: (parent.width-parent.spacing)/2; fontFamily: root.bar.fontFamily; label: "Open Director"; available: root.collaborationActive && root.collaborationBrowserReady; onClicked: root.runAction("collab.open-director") }
       }
-
       Row {
-        width: parent.width
-        spacing: Style.space(8)
-        StreamerButton {
-          width: (parent.width - parent.spacing) / 2
-          fontFamily: root.bar.fontFamily
-          label: "Copy Guest Invite"
-          available: root.collaborationInviteReady && root.collaborationClipboardReady
-          onClicked: root.runAction("collab.copy-invite")
-        }
-        StreamerButton {
-          width: (parent.width - parent.spacing) / 2
-          fontFamily: root.bar.fontFamily
-          label: "Copy OBS Scene URL"
-          available: root.collaborationProgramUrlReady && root.collaborationClipboardReady
-          onClicked: root.runAction("collab.copy-program")
-        }
+        width: parent.width; spacing: Style.space(8)
+        StreamerButton { width: (parent.width-parent.spacing)/2; fontFamily: root.bar.fontFamily; label: "Copy General Invite"; available: root.collaborationInviteReady && root.collaborationClipboardReady; onClicked: root.runAction("collab.copy-invite") }
+        StreamerButton { width: (parent.width-parent.spacing)/2; fontFamily: root.bar.fontFamily; label: "Add Group to OBS"; available: root.collaborationProgramUrlReady && root.obsWebSocketReady; onClicked: root.runAction("collab.obs-add-program") }
       }
-
       Row {
-        width: parent.width
-        spacing: Style.space(8)
-        StreamerButton {
-          width: (parent.width - parent.spacing) / 2
-          fontFamily: root.bar.fontFamily
-          label: "Rotate Room"
-          available: root.collaborationActive
-          danger: true
-          onClicked: root.runAction("collab.rotate")
-        }
-        StreamerButton {
-          width: (parent.width - parent.spacing) / 2
-          fontFamily: root.bar.fontFamily
-          label: "Clear Room"
-          available: root.collaborationActive
-          danger: true
-          onClicked: root.runAction("collab.reset")
+        width: parent.width; spacing: Style.space(8)
+        StreamerButton { width: (parent.width-parent.spacing)/2; fontFamily: root.bar.fontFamily; label: "Copy Group OBS URL"; available: root.collaborationProgramUrlReady && root.collaborationClipboardReady; onClicked: root.runAction("collab.copy-program") }
+        Text {
+          width: (parent.width-parent.spacing)/2
+          height: Style.space(36)
+          text: root.collaborationObsSceneName ? ("OBS scene: " + root.collaborationObsSceneName) : "OBS guest scene"
+          color: Color.foreground
+          font.family: root.bar.fontFamily
+          font.pixelSize: Style.font.caption
+          verticalAlignment: Text.AlignVCenter
+          horizontalAlignment: Text.AlignHCenter
         }
       }
 
       Text {
+        visible: root.collaborationActive && root.collaborationManagedSlotsReady
+        width: parent.width
+        text: "Managed Guest " + root.selectedGuestSlot + " of " + root.collaborationSlotCount
+        color: Color.foreground
+        font.family: root.bar.fontFamily
+        font.pixelSize: Style.font.body
+        font.bold: true
+      }
+      Row {
+        visible: root.collaborationActive && root.collaborationManagedSlotsReady
+        width: parent.width; spacing: Style.space(8)
+        StreamerButton { width: Style.space(80); fontFamily: root.bar.fontFamily; label: "← Guest"; onClicked: root.shiftGuest(-1) }
+        Text { width: parent.width - Style.space(168); height: Style.space(36); text: "Guest " + root.selectedGuestSlot; color: Color.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.body; verticalAlignment: Text.AlignVCenter; horizontalAlignment: Text.AlignHCenter }
+        StreamerButton { width: Style.space(80); fontFamily: root.bar.fontFamily; label: "Guest →"; onClicked: root.shiftGuest(1) }
+      }
+      Row {
+        visible: root.collaborationActive && root.collaborationManagedSlotsReady
+        width: parent.width; spacing: Style.space(8)
+        StreamerButton { width: (parent.width-parent.spacing)/2; fontFamily: root.bar.fontFamily; label: "Copy Guest Invite"; available: root.collaborationClipboardReady; onClicked: root.runAction("collab.copy-slot-invite", root.selectedGuestSlot) }
+        StreamerButton { width: (parent.width-parent.spacing)/2; fontFamily: root.bar.fontFamily; label: "Add Guest to OBS"; available: root.obsWebSocketReady; onClicked: root.runAction("collab.obs-add-slot", root.selectedGuestSlot) }
+      }
+      Row {
+        visible: root.collaborationActive && root.collaborationManagedSlotsReady
+        width: parent.width; spacing: Style.space(8)
+        StreamerButton { width: (parent.width-parent.spacing)/2; fontFamily: root.bar.fontFamily; label: "Copy Guest OBS URL"; available: root.collaborationClipboardReady; onClicked: root.runAction("collab.copy-slot-source", root.selectedGuestSlot) }
+        StreamerButton { width: (parent.width-parent.spacing)/2; fontFamily: root.bar.fontFamily; label: "Rotate Guest Link"; danger: true; onClicked: root.runAction("collab.slot-rotate", root.selectedGuestSlot) }
+      }
+      Row {
+        width: parent.width; spacing: Style.space(8)
+        StreamerButton { width: (parent.width-parent.spacing)/2; fontFamily: root.bar.fontFamily; label: "Rotate Room"; available: root.collaborationActive; danger: true; onClicked: root.runAction("collab.rotate") }
+        StreamerButton { width: (parent.width-parent.spacing)/2; fontFamily: root.bar.fontFamily; label: "Clear Room"; available: root.collaborationActive; danger: true; onClicked: root.runAction("collab.reset") }
+      }
+      Text {
         visible: root.collaborationError !== "" || (root.collaborationActive && (!root.collaborationClipboardReady || !root.collaborationBrowserReady))
         width: parent.width
-        text: root.collaborationError !== ""
-              ? ("Collaboration: " + root.collaborationError)
-              : ((!root.collaborationClipboardReady ? "wl-copy missing · invite copying unavailable" : "")
-                 + (!root.collaborationClipboardReady && !root.collaborationBrowserReady ? " · " : "")
-                 + (!root.collaborationBrowserReady ? "xdg-open missing · director launch unavailable" : ""))
+        text: root.collaborationError !== "" ? ("Collaboration: " + root.collaborationError) : ((!root.collaborationClipboardReady ? "wl-copy missing · link copying unavailable" : "") + (!root.collaborationClipboardReady && !root.collaborationBrowserReady ? " · " : "") + (!root.collaborationBrowserReady ? "xdg-open missing · director launch unavailable" : ""))
         color: Color.urgent
         font.family: root.bar.fontFamily
         font.pixelSize: Style.font.caption
         wrapMode: Text.Wrap
       }
-
       Text {
         width: parent.width
-        text: "Guest and OBS links contain the room password. They are only released by explicit copy/open actions."
-        color: Qt.darker(Color.foreground, 1.25)
+        text: "Managed slot invites carry private stream/control IDs. Status never exposes them. Live guest presence is not claimed until provider control is verified."
+        color: Qt.darker(Color.foreground,1.25)
         font.family: root.bar.fontFamily
         font.pixelSize: Style.font.caption
         wrapMode: Text.Wrap
       }
 
-      Rectangle { width: parent.width; height: Style.space(1); color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.16) }
+      Rectangle { width: parent.width; height: Style.space(1); color: Qt.rgba(Color.foreground.r,Color.foreground.g,Color.foreground.b,0.16) }
 
+      Text { width: parent.width; text: "Stream-Safe Workspace"; color: Color.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
       Text {
         width: parent.width
-        text: "Stream-Safe Workspace"
-        color: Color.foreground
-        font.family: root.bar.fontFamily
-        font.pixelSize: Style.font.subtitle
-        font.bold: true
-      }
-
-      Text {
-        width: parent.width
-        text: root.safetyReady
-              ? ("Workspace: " + (root.workspaceName || "unknown") + (root.streamSafeActive ? "  ·  STREAM-SAFE" : "") + (root.sensitiveActive ? "\n⚠ Sensitive window detected" : "\nActive window check: clear"))
-              : ("Stream-Safe unavailable" + (root.safetyError ? ": " + root.safetyError : ""))
+        text: root.safetyReady ? ("Workspace: " + (root.workspaceName || "unknown") + (root.streamSafeActive ? "  ·  STREAM-SAFE" : "") + (root.sensitiveActive ? "\n⚠ Sensitive window detected" : "\nActive window check: clear")) : ("Stream-Safe unavailable" + (root.safetyError ? ": " + root.safetyError : ""))
         color: root.sensitiveActive ? Color.urgent : Color.foreground
         font.family: root.bar.fontFamily
         font.pixelSize: Style.font.bodySmall
         wrapMode: Text.Wrap
       }
-
       Row {
-        width: parent.width
-        spacing: Style.space(8)
-        StreamerButton {
-          width: (parent.width - parent.spacing) / 2
-          fontFamily: root.bar.fontFamily
-          label: root.streamSafeActive ? "Return Workspace" : "Enter Stream-Safe"
-          available: root.safetyReady || root.streamSafeActive
-          onClicked: root.runAction(root.streamSafeActive ? "workspace.exit" : "workspace.enter")
-        }
-        StreamerButton {
-          width: (parent.width - parent.spacing) / 2
-          fontFamily: root.bar.fontFamily
-          label: "Refresh Safety"
-          onClicked: root.runAction("safety.refresh")
-        }
+        width: parent.width; spacing: Style.space(8)
+        StreamerButton { width: (parent.width-parent.spacing)/2; fontFamily: root.bar.fontFamily; label: root.streamSafeActive ? "Return Workspace" : "Enter Stream-Safe"; available: root.safetyReady || root.streamSafeActive; onClicked: root.runAction(root.streamSafeActive ? "workspace.exit" : "workspace.enter") }
+        StreamerButton { width: (parent.width-parent.spacing)/2; fontFamily: root.bar.fontFamily; label: "Refresh Safety"; onClicked: root.runAction("safety.refresh") }
       }
+      Text { visible: root.sensitiveActive; width: parent.width; text: "Warning only: Streamer does not hide, close, or move this app automatically."; color: Color.urgent; font.family: root.bar.fontFamily; font.pixelSize: Style.font.caption; wrapMode: Text.Wrap }
 
-      Text {
-        visible: root.sensitiveActive
-        width: parent.width
-        text: "Warning only: Omarchy Streamer does not hide, close, or move this app automatically."
-        color: Color.urgent
-        font.family: root.bar.fontFamily
-        font.pixelSize: Style.font.caption
-        wrapMode: Text.Wrap
-      }
+      Rectangle { width: parent.width; height: Style.space(1); color: Qt.rgba(Color.foreground.r,Color.foreground.g,Color.foreground.b,0.16) }
 
-      Rectangle { width: parent.width; height: Style.space(1); color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.16) }
-
+      Text { width: parent.width; text: "Audio Desk"; color: Color.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
       Text {
         width: parent.width
-        text: "Audio Desk"
-        color: Color.foreground
-        font.family: root.bar.fontFamily
-        font.pixelSize: Style.font.subtitle
-        font.bold: true
-      }
-
-      Text {
-        width: parent.width
-        text: root.selectedSourceName !== ""
-              ? ("Mic: " + root.selectedSourceName + (root.selectedSourcePresent ? "" : "  ·  MISSING") + (root.micVolumePercent !== null ? "\nVolume " + Math.round(root.micVolumePercent) + "%" : "") + (root.micMuted === true ? "  ·  MUTED" : ""))
-              : (root.audioReady ? "No microphone selected" : "Audio Desk unavailable")
+        text: root.selectedSourceName !== "" ? ("Mic: " + root.selectedSourceName + (root.selectedSourcePresent ? "" : "  ·  MISSING") + (root.micVolumePercent !== null ? "\nVolume " + Math.round(root.micVolumePercent) + "%" : "") + (root.micMuted === true ? "  ·  MUTED" : "")) : (root.audioReady ? "No microphone selected" : "Audio Desk unavailable")
         color: root.micWarning ? Color.urgent : Color.foreground
         font.family: root.bar.fontFamily
         font.pixelSize: Style.font.bodySmall
         wrapMode: Text.Wrap
       }
+      Row {
+        width: parent.width; spacing: Style.space(8)
+        StreamerButton { width: (parent.width-parent.spacing)/2; fontFamily: root.bar.fontFamily; label: root.audioSources.length > 1 ? "Next Mic" : "Select Mic"; available: root.audioSources.length > 0; onClicked: root.runAction("mic.next") }
+        StreamerButton { width: (parent.width-parent.spacing)/2; fontFamily: root.bar.fontFamily; label: root.micMuted === true ? "Unmute Mic" : "Mute Mic"; available: root.selectedSourcePresent; danger: root.micMuted === true; emphasis: root.micMuted === true; onClicked: root.runAction(root.micMuted === true ? "mic.unmute" : "mic.mute") }
+      }
+      Row {
+        width: parent.width; spacing: Style.space(8)
+        StreamerButton { width: Style.space(72); fontFamily: root.bar.fontFamily; label: "−5%"; available: root.selectedSourcePresent && root.micVolumePercent !== null; onClicked: root.setMicVolumeDelta(-5) }
+        Text { width: parent.width - Style.space(152); height: Style.space(36); text: root.micVolumePercent === null ? "Volume —" : "Mic " + Math.round(root.micVolumePercent) + "%"; color: Color.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall; verticalAlignment: Text.AlignVCenter; horizontalAlignment: Text.AlignHCenter }
+        StreamerButton { width: Style.space(72); fontFamily: root.bar.fontFamily; label: "+5%"; available: root.selectedSourcePresent && root.micVolumePercent !== null; onClicked: root.setMicVolumeDelta(5) }
+      }
+      Text { visible: root.micWarning || (root.audioError !== "" && root.pipewireReady); width: parent.width; text: root.micWarning ? "⚠ Selected microphone disappeared. Choose another mic before going live." : ("Audio: " + root.audioError); color: Color.urgent; font.family: root.bar.fontFamily; font.pixelSize: Style.font.caption; wrapMode: Text.Wrap }
 
       Row {
-        width: parent.width
-        spacing: Style.space(8)
-        StreamerButton {
-          width: (parent.width - parent.spacing) / 2
-          fontFamily: root.bar.fontFamily
-          label: root.audioSources.length > 1 ? "Next Mic" : "Select Mic"
-          available: root.audioSources.length > 0
-          onClicked: root.runAction("mic.next")
-        }
-        StreamerButton {
-          width: (parent.width - parent.spacing) / 2
-          fontFamily: root.bar.fontFamily
-          label: root.micMuted === true ? "Unmute Mic" : "Mute Mic"
-          available: root.selectedSourcePresent
-          danger: root.micMuted === true
-          emphasis: root.micMuted === true
-          onClicked: root.runAction(root.micMuted === true ? "mic.unmute" : "mic.mute")
-        }
+        width: parent.width; spacing: Style.space(8)
+        StreamerButton { width: (parent.width-parent.spacing)/2; fontFamily: root.bar.fontFamily; label: root.obsRunning ? "OBS Running" : "Launch OBS"; available: root.obsInstalled && !root.obsRunning; onClicked: root.runAction("obs.launch") }
+        StreamerButton { width: (parent.width-parent.spacing)/2; fontFamily: root.bar.fontFamily; label: root.privacy ? "Privacy ON" : "Privacy off"; danger: root.privacyWarning; onClicked: root.runAction(root.privacy ? "privacy.disable" : "privacy.enable") }
       }
 
-      Row {
-        width: parent.width
-        spacing: Style.space(8)
-        StreamerButton {
-          width: Style.space(72)
-          fontFamily: root.bar.fontFamily
-          label: "−5%"
-          available: root.selectedSourcePresent && root.micVolumePercent !== null
-          onClicked: root.setMicVolumeDelta(-5)
-        }
-        Text {
-          width: parent.width - Style.space(152)
-          height: Style.space(36)
-          verticalAlignment: Text.AlignVCenter
-          horizontalAlignment: Text.AlignHCenter
-          text: root.micVolumePercent === null ? "Volume —" : "Mic " + Math.round(root.micVolumePercent) + "%"
-          color: Color.foreground
-          font.family: root.bar.fontFamily
-          font.pixelSize: Style.font.bodySmall
-        }
-        StreamerButton {
-          width: Style.space(72)
-          fontFamily: root.bar.fontFamily
-          label: "+5%"
-          available: root.selectedSourcePresent && root.micVolumePercent !== null
-          onClicked: root.setMicVolumeDelta(5)
-        }
-      }
-
-      Text {
-        visible: root.micWarning || (root.audioError !== "" && root.pipewireReady)
-        width: parent.width
-        text: root.micWarning ? "⚠ Selected microphone disappeared. Choose another mic before going live." : ("Audio: " + root.audioError)
-        color: Color.urgent
-        font.family: root.bar.fontFamily
-        font.pixelSize: Style.font.caption
-        wrapMode: Text.Wrap
-      }
-
-      Row {
-        width: parent.width
-        spacing: Style.space(8)
-        StreamerButton {
-          width: (parent.width - parent.spacing) / 2
-          fontFamily: root.bar.fontFamily
-          label: root.obsRunning ? "OBS Running" : "Launch OBS"
-          available: root.obsInstalled && !root.obsRunning
-          onClicked: root.runAction("obs.launch")
-        }
-        StreamerButton {
-          width: (parent.width - parent.spacing) / 2
-          fontFamily: root.bar.fontFamily
-          label: root.privacy ? "Privacy ON" : "Privacy off"
-          danger: root.privacyWarning
-          onClicked: root.runAction(root.privacy ? "privacy.disable" : "privacy.enable")
-        }
-      }
-
-      Text {
-        visible: root.obsRunning && !root.obsWebSocketReady && root.obsWebSocketError !== ""
-        width: parent.width
-        text: "OBS control: " + root.obsWebSocketError
-        color: Color.urgent
-        font.family: root.bar.fontFamily
-        font.pixelSize: Style.font.caption
-        wrapMode: Text.Wrap
-      }
-
-      Text {
-        visible: root.actionMessage !== ""
-        width: parent.width
-        text: root.actionMessage
-        color: root.actionMessage.indexOf("error:") === 0 ? Color.urgent : Color.foreground
-        font.family: root.bar.fontFamily
-        font.pixelSize: Style.font.caption
-        wrapMode: Text.Wrap
-      }
-
-      Text {
-        width: parent.width
-        text: "v0.5 Collaboration Core · browser guests · credential-safe room workflow"
-        color: Qt.darker(Color.foreground, 1.35)
-        font.family: root.bar.fontFamily
-        font.pixelSize: Style.font.caption
-        wrapMode: Text.Wrap
-      }
+      Text { visible: root.obsRunning && !root.obsWebSocketReady && root.obsWebSocketError !== ""; width: parent.width; text: "OBS control: " + root.obsWebSocketError; color: Color.urgent; font.family: root.bar.fontFamily; font.pixelSize: Style.font.caption; wrapMode: Text.Wrap }
+      Text { visible: root.actionMessage !== ""; width: parent.width; text: root.actionMessage; color: root.actionMessage.indexOf("error:") === 0 ? Color.urgent : Color.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.caption; wrapMode: Text.Wrap }
+      Text { width: parent.width; text: "v0.6 Managed Guests · per-guest links · one-click OBS browser sources"; color: Qt.darker(Color.foreground,1.35); font.family: root.bar.fontFamily; font.pixelSize: Style.font.caption; wrapMode: Text.Wrap }
     }
   }
 
