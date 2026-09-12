@@ -16,6 +16,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,7 @@ GUEST_STATE_MAX_AGE = int(os.environ.get("OMARCHY_STREAMER_GUEST_STATE_MAX_AGE",
 STATE_ROOT = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "omarchy-streamer"
 SESSION_FILE = STATE_ROOT / "collab-session.json"
 GUEST_STATE_FILE = STATE_ROOT / "collab-guest-state.json"
+_GUEST_STATE_LOCK = threading.Lock()
 
 
 class CollabError(RuntimeError):
@@ -245,29 +247,34 @@ def clear_guest_state(slot_number: int | None = None) -> None:
         except FileNotFoundError:
             pass
         return
-    remaining = [entry for entry in load_guest_state() if int(entry.get("slot", 0)) != int(slot_number)]
-    if remaining:
-        save_guest_state(remaining)
-    else:
-        clear_guest_state()
+    with _GUEST_STATE_LOCK:
+        remaining = [entry for entry in load_guest_state() if int(entry.get("slot", 0)) != int(slot_number)]
+        if remaining:
+            save_guest_state(remaining)
+        else:
+            try:
+                GUEST_STATE_FILE.unlink()
+            except FileNotFoundError:
+                pass
 
 
 def update_guest_state(slot_number: int, *, online: bool | None, mic_enabled: bool | None = None, error: str = "") -> dict[str, Any]:
-    states = {int(entry["slot"]): dict(entry) for entry in load_guest_state()}
-    previous = states.get(int(slot_number), {})
-    if mic_enabled is None and online is True:
-        previous_mic = previous.get("micEnabled")
-        mic_enabled = previous_mic if isinstance(previous_mic, bool) else None
-    entry = {
-        "slot": int(slot_number),
-        "online": online,
-        "micEnabled": mic_enabled if online is True else None,
-        "checkedAt": int(time.time()),
-        "error": str(error)[:32],
-    }
-    states[int(slot_number)] = entry
-    save_guest_state([states[key] for key in sorted(states)])
-    return entry
+    with _GUEST_STATE_LOCK:
+        states = {int(entry["slot"]): dict(entry) for entry in load_guest_state()}
+        previous = states.get(int(slot_number), {})
+        if mic_enabled is None and online is True:
+            previous_mic = previous.get("micEnabled")
+            mic_enabled = previous_mic if isinstance(previous_mic, bool) else None
+        entry = {
+            "slot": int(slot_number),
+            "online": online,
+            "micEnabled": mic_enabled if online is True else None,
+            "checkedAt": int(time.time()),
+            "error": str(error)[:32],
+        }
+        states[int(slot_number)] = entry
+        save_guest_state([states[key] for key in sorted(states)])
+        return entry
 
 
 def safe_guest_states(session: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -321,8 +328,8 @@ def refresh_guests() -> list[dict[str, Any]]:
     slots = list(session.get("slots", []))
     if not slots:
         return []
-    # Each managed page has its own private control capability. Probe in
-    # parallel so a four-slot refresh takes one timeout window, not four.
+    # Probe concurrently, but update_guest_state serializes each atomic
+    # read-modify-write so parallel callbacks cannot clobber another slot.
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(slots))) as pool:
         list(pool.map(probe_slot, slots))
     return safe_guest_states(session)
