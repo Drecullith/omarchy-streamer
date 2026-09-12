@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "id": "io.github.drecullith.streamer",
   "name": "Omarchy Streamer",
-  "version": "0.1.0",
+  "version": "0.6.0",
   "author": "Drecullith",
-  "description": "Streamer mode for Omarchy: OBS orchestration, privacy controls, health status, and creator workflows",
+  "description": "Streamer mode for Omarchy: OBS control, Audio Desk, stream-safe privacy, managed guests, and creator workflows",
   "homepage": "https://github.com/Drecullith/omarchy-streamer",
   "license": "MIT",
   "kinds": [
@@ -18,7 +18,7 @@
   },
   "barWidget": {
     "displayName": "Streamer",
-    "description": "Streamer mode, OBS and privacy status",
+    "description": "Streamer mode, OBS, audio, privacy, and collaboration controls",
     "category": "Media",
     "allowMultiple": false,
     "defaultSection": "right"
