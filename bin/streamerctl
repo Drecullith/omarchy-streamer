@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OBSWS="$SCRIPT_DIR/obsws.py"
 AUDIOCTL="$SCRIPT_DIR/audioctl.py"
 SAFETYCTL="$SCRIPT_DIR/safetyctl.py"
+COLLABCTL="$SCRIPT_DIR/collabctl.py"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-streamer"
 ACTIVE_FILE="$STATE_DIR/active"
 PRIVACY_FILE="$STATE_DIR/privacy"
@@ -124,6 +125,16 @@ safety_status_json() {
   if [[ "$raw" == \{*\} ]]; then printf '%s' "$raw"; else printf '%s' '{"ready":false,"workspaceName":"","streamSafeActive":false,"sensitiveActive":false,"sensitiveRule":"","activeWindowClass":"","error":"Stream-Safe status failed"}'; fi
 }
 
+collab_status_json() {
+  if ! have python3; then
+    printf '%s' '{"ready":false,"active":false,"provider":"","providerLabel":"","clipboardReady":false,"browserReady":false,"inviteReady":false,"programUrlReady":false,"credentialsExposed":false,"error":"python3 is required for Collaboration"}'
+    return 0
+  fi
+  local raw
+  raw="$(python3 "$COLLABCTL" status 2>/dev/null || true)"
+  if [[ "$raw" == \{*\} ]]; then printf '%s' "$raw"; else printf '%s' '{"ready":false,"active":false,"provider":"","providerLabel":"","clipboardReady":false,"browserReady":false,"inviteReady":false,"programUrlReady":false,"credentialsExposed":false,"error":"Collaboration status failed"}'; fi
+}
+
 run_obs_action() {
   local action="$1" arg="${2:-}"
   if ! pgrep -x obs >/dev/null 2>&1; then printf 'error: OBS is not running\n' >&2; exit 6; fi
@@ -141,6 +152,12 @@ run_safety_action() {
   local action="$1"
   if ! have python3; then printf 'error: python3 is required for Stream-Safe controls\n' >&2; exit 9; fi
   python3 "$SAFETYCTL" action "$action"
+}
+
+run_collab_action() {
+  local action="$1"
+  if ! have python3; then printf 'error: python3 is required for Collaboration\n' >&2; exit 10; fi
+  python3 "$COLLABCTL" action "$action"
 }
 
 best_effort_obs() {
@@ -163,7 +180,7 @@ emergency_action() {
 }
 
 status_json() {
-  local active privacy obs_installed obs_running pipewire_ready wpctl_installed python_ready dnd_state dnd_managed obs_ws audio safety
+  local active privacy obs_installed obs_running pipewire_ready wpctl_installed python_ready dnd_state dnd_managed obs_ws audio safety collab
   active="$(file_bool "$ACTIVE_FILE")"
   privacy="$(file_bool "$PRIVACY_FILE")"
   have obs && obs_installed=true || obs_installed=false
@@ -176,10 +193,11 @@ status_json() {
   obs_ws="$(obs_status_json)"
   audio="$(audio_status_json)"
   safety="$(safety_status_json)"
-  printf '{"version":4,"active":%s,"privacy":%s,"obsInstalled":%s,"obsRunning":%s,"pipewireReady":%s,"wpctlInstalled":%s,"pythonReady":%s,"dndState":"%s","dndManaged":%s,"obsWebSocket":%s,"audio":%s,"safety":%s}\n' \
+  collab="$(collab_status_json)"
+  printf '{"version":5,"active":%s,"privacy":%s,"obsInstalled":%s,"obsRunning":%s,"pipewireReady":%s,"wpctlInstalled":%s,"pythonReady":%s,"dndState":"%s","dndManaged":%s,"obsWebSocket":%s,"audio":%s,"safety":%s,"collaboration":%s}\n' \
     "$(json_bool "$active")" "$(json_bool "$privacy")" "$(json_bool "$obs_installed")" "$(json_bool "$obs_running")" \
     "$(json_bool "$pipewire_ready")" "$(json_bool "$wpctl_installed")" "$(json_bool "$python_ready")" "$dnd_state" \
-    "$(json_bool "$dnd_managed")" "$obs_ws" "$audio" "$safety"
+    "$(json_bool "$dnd_managed")" "$obs_ws" "$audio" "$safety" "$collab"
 }
 
 run_action() {
@@ -196,6 +214,7 @@ run_action() {
     mic.select|mic.next|mic.mute|mic.unmute|mic.toggle|mic.volume) run_audio_action "$action" "$arg" ;;
     workspace.enter|workspace.exit|safety.refresh|window.check) run_safety_action "$action" ;;
     emergency.end-live|emergency.stop-all) emergency_action "$action" ;;
+    collab.create|collab.rotate|collab.reset|collab.open-director|collab.copy-invite|collab.copy-program) run_collab_action "$action" ;;
     *) printf 'error: unknown action: %s\n' "$action" >&2; exit 2 ;;
   esac
 }
