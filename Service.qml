@@ -15,6 +15,7 @@ Item {
   property bool pipewireReady: false
   property bool wpctlInstalled: false
   property bool pythonReady: false
+
   property bool obsWebSocketReady: false
   property var streaming: null
   property var recording: null
@@ -31,15 +32,22 @@ Item {
   property var micVolumePercent: null
   property string audioError: ""
 
+  property bool safetyReady: false
+  property string workspaceName: ""
+  property bool streamSafeActive: false
+  property bool sensitiveActive: false
+  property string sensitiveRule: ""
+  property string activeWindowClass: ""
+  property string safetyError: ""
+
   property string dndState: "unknown"
   property bool dndManaged: false
   property string lastAction: ""
   property string lastError: ""
-  property string statusBuffer: ""
 
   function snapshot() {
     return {
-      version: 3,
+      version: 4,
       active: root.active,
       privacy: root.privacy,
       obsInstalled: root.obsInstalled,
@@ -61,6 +69,13 @@ Item {
       micMuted: root.micMuted,
       micVolumePercent: root.micVolumePercent,
       audioError: root.audioError,
+      safetyReady: root.safetyReady,
+      workspaceName: root.workspaceName,
+      streamSafeActive: root.streamSafeActive,
+      sensitiveActive: root.sensitiveActive,
+      sensitiveRule: root.sensitiveRule,
+      activeWindowClass: root.activeWindowClass,
+      safetyError: root.safetyError,
       dndState: root.dndState,
       dndManaged: root.dndManaged,
       lastAction: root.lastAction,
@@ -73,6 +88,8 @@ Item {
       var state = JSON.parse(String(raw || "{}"))
       var obs = state.obsWebSocket || {}
       var audio = state.audio || {}
+      var safety = state.safety || {}
+
       root.active = !!state.active
       root.privacy = !!state.privacy
       root.obsInstalled = !!state.obsInstalled
@@ -80,6 +97,7 @@ Item {
       root.pipewireReady = !!state.pipewireReady
       root.wpctlInstalled = !!state.wpctlInstalled
       root.pythonReady = !!state.pythonReady
+
       root.obsWebSocketReady = !!obs.connected
       root.streaming = obs.streaming === null || obs.streaming === undefined ? null : !!obs.streaming
       root.recording = obs.recording === null || obs.recording === undefined ? null : !!obs.recording
@@ -96,6 +114,14 @@ Item {
       root.micVolumePercent = audio.volumePercent === null || audio.volumePercent === undefined ? null : Number(audio.volumePercent)
       root.audioError = String(audio.error || "")
 
+      root.safetyReady = !!safety.ready
+      root.workspaceName = String(safety.workspaceName || "")
+      root.streamSafeActive = !!safety.streamSafeActive
+      root.sensitiveActive = !!safety.sensitiveActive
+      root.sensitiveRule = String(safety.sensitiveRule || "")
+      root.activeWindowClass = String(safety.activeWindowClass || "")
+      root.safetyError = String(safety.error || "")
+
       root.dndState = String(state.dndState || "unknown")
       root.dndManaged = !!state.dndManaged
       root.lastError = ""
@@ -106,7 +132,6 @@ Item {
 
   function refreshStatus() {
     if (statusProc.running) return
-    root.statusBuffer = ""
     statusProc.running = true
   }
 
@@ -147,6 +172,12 @@ Item {
       case "mic.unmute":
       case "mic.toggle":
       case "mic.volume":
+      case "workspace.enter":
+      case "workspace.exit":
+      case "window.check":
+      case "safety.refresh":
+      case "emergency.end-live":
+      case "emergency.stop-all":
         return root.queueAction(name, arg)
       default:
         return "unknown-action"
